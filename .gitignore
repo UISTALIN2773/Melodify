@@ -1,0 +1,59 @@
+## =========================================================================
+## .gitignore para Melodyfy (C# / WinForms & Rust Backend)
+## =========================================================================
+
+# --- Rust & Cargo ---
+target/
+melodyfy-rust/target/
+
+# --- Caché local y datos de usuario ---
+cache/
+melodyfy-rust/cache/
+library.json
+
+# --- Ejecutables generados y binarios pesados ---
+Melodyfy.exe
+Melodyfy-Rust.exe
+Melodyfy-Rust - copia.exe
+Melodyfy-Rust.old
+*.old
+yt-dlp.exe
+
+# --- Artefactos de Compilación .NET / C# ---
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+build/
+dist/
+
+# --- Archivos de depuración y temporales ---
+*.pdb
+*.mdb
+*.ilk
+*.exp
+*.lib
+*.idb
+*.cache
+
+# --- Archivos de Configuración de Entorno e IDEs ---
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.resharper
+*.DotSettings.user
+.vs/
+.vscode/
+.idea/
+
+# --- Logs y Diagnósticos ---
+*.log
+[Ll]og/
+[Ll]ogs/
+
+# --- Archivos de Sistema Operativo ---
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store

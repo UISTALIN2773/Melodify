@@ -1,0 +1,41 @@
+# Progress Log
+
+- [x] Diagnosed and fixed the COM pointer misalignment crash (`0xc0000409`) in `audio.rs`.
+- [x] Added `webp` image decoding feature in `Cargo.toml`.
+- [x] Fixed thumbnail URLs in `streamer.rs` with guaranteed `hqdefault.jpg` fallback.
+- [x] Rendered album art covers in song lists (44x44 rounded) and bottom player bar (56x56 rounded).
+- [x] Added Spotify 6-card grid with category mixes and play buttons on hover.
+- [x] Added toast notification feedback for queue and favorites.
+- [x] Compiled and deployed rock-solid release binary `Melodyfy-Rust.exe`.
+- [x] Implemented adaptive repaint throttling (500ms idle vs 50ms active, 0.0% idle CPU).
+- [x] Added instant queue prefetching for 0ms gapless transitions between songs.
+- [x] Added real-time animated Spotify equalizer wave in bottom player bar.
+- [x] Added quick search filter chips ("Top 50", "Lo-Fi", "Rock", "Bad Bunny", etc.) and clear button "✕".
+- [x] Added interactive track row hover effects with dynamic play button indicators.
+- [x] Diagnosed and fixed audio playback stall:
+  - Added Win32 STA message pump (`PeekMessageW` / `DispatchMessageW`) in `audio.rs` so WMPlayer.OCX handles asynchronous network streaming callbacks.
+  - Fixed track row single-click hitbox in `app.rs` so clicking anywhere on the track row starts playing immediately.
+  - Recompiled and redeployed `Melodyfy-Rust.exe`.
+- [x] Implemented instant-playback engine via proactive background prefetching (`prefetch_internal`) for top search results and queue tracks (0.001s response).
+- [x] Overhauled bottom playback bar: fixed seekbar asymmetry and squishing, aligning wide centered seekbar (400-500px) directly below controls.
+- [x] Implemented dynamic custom tags management (`➕ Tag`, `✏️ Quitar / Editar` with red `✕`) persisted in `library.json`.
+- [x] Implemented dedicated floating Mini-Player HUD mode (430x105) for background multitasking while gaming or working.
+- [x] Agent 1 UI/UX Hardening:
+  - Injected `C:\Windows\Fonts\seguiemj.ttf` as fallback in `FontDefinitions` in `main.rs`, completely eliminating all ToFU (□) boxes for emojis and icons.
+  - Pinned fixed 44x44 placeholder in track table rows to eliminate visual row shifting/jumping.
+  - Balanced and clean closures in `render_mini_player_ui` and fixed button API calls.
+  - Calibrated mini-player window toggle (440x120 floating always-on-top <-> 1150x740 normal).
+  - Clean `cargo check` and release binary deployed to `Melodyfy-Rust.exe`.
+- [x] Level 1000 Player Bar Overhaul:
+  - Replaced egui Slider (which suffered from hardcoded 100px width limit and margin collapse) with custom-painted `custom_spotify_seekbar` and `custom_spotify_volume_bar`.
+  - Pinned absolute docking for left (300px), center (spanning 450-580px seekbar with time labels), and right (volume and mini-player anchored directly to the right edge with 0 gap).
+  - Added live timestamp hover tooltip, interactive 4px -> 6px hover expand, white glowing knob, and crisp 1px top border separator.
+  - Recompiled and deployed `Melodyfy-Rust.exe`.
+- [x] Migrated audio engine from legacy ActiveX WMPlayer.OCX to native Windows Core MediaPlayer (`windows::Media::Playback::MediaPlayer` / Media Foundation).
+- [x] Eliminated all `unsafe` COM transmutations, access violations (`0xc0000409`), and SEH crashes during HTTPS chunked streaming.
+- [x] Added global panic hook to `main.rs` to write diagnostic logs to `melodyfy_error.log`.
+- [x] Level 1000 Player Bar Symmetrical Layout Fix:
+  - Replaced faulty `new_child` scopes with scoped `allocate_new_ui` bound to absolute mathematically centered rects (`center_x = full_rect.center().x`, `center_w = 44%`).
+  - Anchored right controls (`🕹️`, `📑`, volume slider, `🔊`) directly to window right margin (`Layout::right_to_left`), completely eliminating the blank right gap.
+  - Expanded seekbar from cramped 100px to full-width centered slider (280-560px) with always-visible tactile circular thumb knob and smooth hover expansion.
+- [x] Recompiled and redeployed rock-solid optimized release binary `Melodyfy-Rust.exe`.

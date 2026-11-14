@@ -1,0 +1,27 @@
+[package]
+name = "melodyfy-rust"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+eframe = { version = "0.30", default-features = true }
+egui_extras = { version = "0.30", features = ["all_loaders"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+windows = { version = "0.54.0", features = [
+    "Foundation",
+    "Media_Playback",
+    "Media_Core",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
