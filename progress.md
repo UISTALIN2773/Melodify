@@ -44,3 +44,15 @@
 - [x] Added `cache/ytdlp` shared cache-dir, `--force-ipv4`, and `--socket-timeout 5` for network acceleration.
 - [x] Added dynamic reactive row loading feedback (`⏳`) on track click.
 - [x] Deployed high-speed release binary to `Melodyfy-Rust.exe`.
+
+- [x] Spotify Mobile Edition Completa:
+  - Implementado motor HTTP InnerTube autónomo en `src/innertube.rs` (`ureq 3.5.2` con rustls).
+  - Integrada la interfaz completa Spotify Mobile en `src/app.rs`:
+    - Viewport vertical calibrado 9:16 (390×820 px).
+    - Barra de navegación inferior móvil (`🏠 Inicio`, `🔍 Buscar`, `📚 Biblioteca`).
+    - Sticky Mini-Player flotante con toque para abrir reproductor completo.
+    - Pantalla completa de reproducción móvil (*BottomSheet / Fullscreen Player*): carátula gigante 280×280, controles táctiles grandes, botón Play circular de 58 px, seekbar táctil y volumen.
+    - Botón de alternancia bidireccional en caliente entre versión móvil y versión de escritorio (`💻 PC` <-> `📱 Móvil`).
+  - Creado binario ejecutable dedicado [Melodyfy-Mobile.exe](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/Melodyfy-Mobile.exe) (7.77 MB).
+  - Creado lanzador rápido [iniciar_melodyfy_mobile.bat](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/iniciar_melodyfy_mobile.bat).
+  - Redactada la [guía de compilación para Android APK](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/android_build_guide.md).

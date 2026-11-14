@@ -12,8 +12,8 @@ Crear una versión móvil nativa y completa de Melodyfy basada en la versión ac
 4. **Soporte Android NDK / Cargo-APK:** Configuración de `Cargo.toml` y manifiesto para compilación cruzada hacia APK.
 
 ## Fases
-- [ ] Fase 1: Implementar módulo InnerTube en Rust (`src/innertube.rs`) para extracción autónoma sin Python.
-- [ ] Fase 2: Implementar la UI completa de Spotify Mobile en `src/app.rs` (Bottom Nav, Sticky Mini-player, Fullscreen Now-Playing View).
-- [ ] Fase 3: Agregar binario dedicado `melodyfy-mobile` y comando de arranque `--mobile` en `main.rs`.
-- [ ] Fase 4: Compilar `Melodyfy-Mobile.exe` y `Melodyfy-Rust.exe`, probar navegación y verificar que no haya errores.
-- [ ] Fase 5: Crear lanzador `.bat` y documentar en `findings.md` y `progress.md`.
+- [x] Fase 1: Implementar módulo InnerTube en Rust (`src/innertube.rs`) para extracción autónoma sin Python.
+- [x] Fase 2: Implementar la UI completa de Spotify Mobile en `src/app.rs` (Bottom Nav, Sticky Mini-player, Fullscreen Now-Playing View).
+- [x] Fase 3: Agregar binario dedicado `melodyfy-mobile` y comando de arranque `--mobile` en `main.rs`.
+- [x] Fase 4: Compilar `Melodyfy-Mobile.exe` y `Melodyfy-Rust.exe`, probar navegación y verificar que no haya errores.
+- [x] Fase 5: Crear lanzador `.bat` y documentar en `findings.md` y `progress.md`.

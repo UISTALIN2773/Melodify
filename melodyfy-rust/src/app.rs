@@ -52,10 +52,18 @@ pub struct MelodyfyApp {
     show_add_tag_dialog: bool,
     new_tag_label: String,
     new_tag_query: String,
+
+    // Mobile Mode (Genuine Spotify Mobile 9:16 UI)
+    pub is_mobile_mode: bool,
+    pub show_mobile_fullscreen_player: bool,
+    pub mobile_library_subtab: usize,
+
+    // Category filter for the Home Popular Grid
+    pub popular_category_filter: usize,
 }
 
 impl MelodyfyApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>, start_in_mobile: bool) -> Self {
         let audio = Arc::new(AudioEngine::new());
         let streamer = Arc::new(Streamer::new());
         let library = AppLibrary::load();
@@ -87,10 +95,14 @@ impl MelodyfyApp {
             show_add_tag_dialog: false,
             new_tag_label: String::new(),
             new_tag_query: String::new(),
+            is_mobile_mode: start_in_mobile,
+            show_mobile_fullscreen_player: false,
+            mobile_library_subtab: 0,
+            popular_category_filter: 0,
         };
 
-        // Default initial home query
-        app.trigger_search("Top Éxitos Mundiales 2026");
+        // Default initial home query: Anime Openings & J-Pop
+        app.trigger_search("Anime Openings J-Pop Hits");
         app
     }
 
@@ -335,6 +347,12 @@ impl eframe::App for MelodyfyApp {
             return;
         }
 
+        // Mobile Mode (Genuine Spotify Mobile 9:16 vertical layout)
+        if self.is_mobile_mode {
+            self.render_mobile_ui(ctx, accent);
+            return;
+        }
+
         // BOTTOM PLAYBACK BAR (Always fixed at bottom)
         egui::TopBottomPanel::bottom("bottom_bar")
             .exact_height(90.0)
@@ -439,6 +457,21 @@ impl MelodyfyApp {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
             ui.add_space(12.0);
+
+            // Switch to Mobile Format (390x820)
+            if ui.add(egui::Button::new(egui::RichText::new("📱 Modo Móvil (9:16)").size(11.5).color(accent))
+                .fill(Color32::from_rgb(32, 32, 32))
+                .rounding(Rounding::same(8.0))
+                .min_size(Vec2::new(190.0, 30.0)))
+                .on_hover_text("Cambiar a interfaz táctil de smartphone (390x820)")
+                .clicked()
+            {
+                self.is_mobile_mode = true;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(390.0, 820.0)));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title("📱 Melodyfy Mobile".into()));
+            }
+
+            ui.add_space(6.0);
 
             let theme_label = if self.use_spotify_green { "🟢 Verde Spotify" } else { "🟠 Ámbar Editorial" };
             if ui.small_button(theme_label).on_hover_text("Cambiar color de acento").clicked() {
@@ -592,14 +625,14 @@ impl MelodyfyApp {
 
             ui.add_space(16.0);
 
-            // Spotify 6-Card Grid
+            // Spotify 6-Card Grid: J-Pop, Anime Openings & Covers
             let grid_cards = [
-                ("🎧 Lo-Fi Chill", "Lo-Fi Gaming Chill Beats", Color32::from_rgb(45, 70, 185)),
-                ("⚡ Cyberpunk 80s", "Synthwave Cyberpunk 80s", Color32::from_rgb(140, 25, 120)),
-                ("🔥 Top 50 Global", "Top Éxitos Mundiales 2026", Color32::from_rgb(30, 120, 60)),
-                ("🎸 Rock Clásicos", "Rock Clásico 80s 90s", Color32::from_rgb(180, 50, 30)),
-                ("🌸 Anime Beats", "Anime Openings HD", Color32::from_rgb(190, 80, 130)),
-                ("🚗 Phonk Drift", "Phonk Drift Bass boosted", Color32::from_rgb(80, 30, 140)),
+                ("🌸 J-Pop Hits", "J-Pop Hits 2026", Color32::from_rgb(180, 45, 110)),
+                ("⚔️ Openings Anime", "Anime Openings HD", Color32::from_rgb(45, 70, 185)),
+                ("🎸 Covers de OPs", "Anime Rock Metal Covers", Color32::from_rgb(175, 40, 30)),
+                ("🔥 Shonen Hits", "Shonen Anime Openings", Color32::from_rgb(195, 100, 20)),
+                ("🌃 City Pop 80s", "Japanese City Pop 80s", Color32::from_rgb(130, 30, 120)),
+                ("🎧 Anime Lo-Fi", "Anime Lofi Chill Beats", Color32::from_rgb(30, 120, 70)),
             ];
 
             let card_width = ((ui.available_width() - 60.0) / 3.0).max(180.0);
@@ -653,12 +686,341 @@ impl MelodyfyApp {
             ui.add_space(20.0);
             ui.horizontal(|ui| {
                 ui.add_space(16.0);
-                ui.heading(egui::RichText::new("Canciones Populares").size(22.0).strong().color(Color32::WHITE));
+                ui.heading(egui::RichText::new("Canciones Populares • J-Pop & Anime OPs").size(22.0).strong().color(Color32::WHITE));
             });
 
             ui.add_space(10.0);
-            self.render_track_table(ui, &self.search_results.clone(), accent);
+            self.render_popular_cards_grid(ui, accent);
         });
+    }
+
+    fn render_popular_cards_grid(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        // Category Filter Chips
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            let filters = [
+                (0, "🔥 Todo"),
+                (1, "🌸 J-Pop"),
+                (2, "⚔️ Openings Anime"),
+                (3, "🎸 Covers de OPs"),
+                (4, "🌃 City Pop"),
+            ];
+
+            for (idx, name) in filters {
+                let is_selected = self.popular_category_filter == idx;
+                let bg_color = if is_selected { accent } else { Color32::from_rgb(38, 38, 38) };
+                let text_color = if is_selected { Color32::BLACK } else { Color32::WHITE };
+
+                let btn = egui::Button::new(egui::RichText::new(name).size(12.5).strong().color(text_color))
+                    .fill(bg_color)
+                    .rounding(Rounding::same(16.0));
+
+                if ui.add(btn).clicked() {
+                    self.popular_category_filter = idx;
+                }
+                ui.add_space(4.0);
+            }
+        });
+
+        ui.add_space(12.0);
+
+        struct PopularCardItem {
+            title: &'static str,
+            artist: &'static str,
+            category: usize, // 1 = J-Pop, 2 = Openings Anime, 3 = Covers de OPs, 4 = City Pop
+            query: &'static str,
+            thumbnail_url: &'static str,
+        }
+
+        let items: &[PopularCardItem] = &[
+            // --- OPENINGS DE ANIME ---
+            PopularCardItem {
+                title: "Idol (アイドル)",
+                artist: "YOASOBI • Oshi no Ko",
+                category: 2,
+                query: "YOASOBI Idol Official Music Video",
+                thumbnail_url: "https://i.ytimg.com/vi/ZRtdQ81jPUQ/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "KICK BACK",
+                artist: "Kenshi Yonezu • Chainsaw Man",
+                category: 2,
+                query: "Kenshi Yonezu KICK BACK Official",
+                thumbnail_url: "https://i.ytimg.com/vi/M2cckDmNLMI/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "SPECIALZ",
+                artist: "King Gnu • Jujutsu Kaisen S2",
+                category: 2,
+                query: "King Gnu SPECIALZ Official Video",
+                thumbnail_url: "https://i.ytimg.com/vi/fhzKLfZq6mg/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "The Rumbling",
+                artist: "SiM • Attack on Titan",
+                category: 2,
+                query: "SiM The Rumbling Official Video",
+                thumbnail_url: "https://i.ytimg.com/vi/OB8_w51Pv0E/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "紅蓮華 (Gurenge)",
+                artist: "LiSA • Demon Slayer OP",
+                category: 2,
+                query: "LiSA 紅蓮華 Gurenge Official",
+                thumbnail_url: "https://i.ytimg.com/vi/CwkzK-F0Y00/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "廻廻奇譚 (Kaikai Kitan)",
+                artist: "Eve • Jujutsu Kaisen OP",
+                category: 2,
+                query: "Eve 廻廻奇譚 Kaikai Kitan Official",
+                thumbnail_url: "https://i.ytimg.com/vi/1tk1P1sQuX0/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "unravel",
+                artist: "TK from 凛として時雨 • Tokyo Ghoul",
+                category: 2,
+                query: "TK from 凛として時雨 unravel Official",
+                thumbnail_url: "https://i.ytimg.com/vi/Fve_lHIPa-I/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "残響散歌 (Zankyou Sanka)",
+                artist: "Aimer • Demon Slayer Yuukaku",
+                category: 2,
+                query: "Aimer 残響散歌 Zankyou Sanka",
+                thumbnail_url: "https://i.ytimg.com/vi/tLQLa6lM3Us/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Bling-Bang-Bang-Born",
+                artist: "Creepy Nuts • Mashle S2",
+                category: 2,
+                query: "Creepy Nuts Bling-Bang-Bang-Born Official",
+                thumbnail_url: "https://i.ytimg.com/vi/210R0ozmLwg/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "シルエット (Silhouette)",
+                artist: "KANA-BOON • Naruto OP 16",
+                category: 2,
+                query: "KANA-BOON シルエット Silhouette Official",
+                thumbnail_url: "https://i.ytimg.com/vi/dlFA0Zq1k2A/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "青のすみか (Where Our Blue Is)",
+                artist: "Tatsuya Kitani • Jujutsu Kaisen",
+                category: 2,
+                query: "Tatsuya Kitani 青のすみか Where Our Blue Is",
+                thumbnail_url: "https://i.ytimg.com/vi/zuoVs1kflu8/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "心臓を捧げよ! (Sasageyo)",
+                artist: "Linked Horizon • Attack on Titan",
+                category: 2,
+                query: "Linked Horizon Shinzou wo Sasageyo Official",
+                thumbnail_url: "https://i.ytimg.com/vi/CID-sYQNCew/hqdefault.jpg",
+            },
+
+            // --- COVERS DE OPENINGS (ROCK / METAL / ENGLISH / ACOUSTIC) ---
+            PopularCardItem {
+                title: "Unravel (Rock Cover)",
+                artist: "Jonathan Young • Tokyo Ghoul",
+                category: 3,
+                query: "Unravel Jonathan Young Tokyo Ghoul Rock Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/s0c2QzTq2_s/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "The Rumbling (Metal Cover)",
+                artist: "Raon Lee • Attack on Titan",
+                category: 3,
+                query: "Raon Lee The Rumbling Attack on Titan Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/lq4sQkU26lQ/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Silhouette (English Cover)",
+                artist: "NateWantsToBattle • Naruto OP",
+                category: 3,
+                query: "NateWantsToBattle Silhouette Naruto English Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/Dq0G3hLw2s4/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Kaikai Kitan (Metal Cover)",
+                artist: "PelleK • Jujutsu Kaisen OP",
+                category: 3,
+                query: "PelleK Kaikai Kitan Jujutsu Kaisen Metal Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/z9iGv5XQZfs/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Gurenge (Metal Cover)",
+                artist: "RichaadEB & Jonathan Young",
+                category: 3,
+                query: "Jonathan Young RichaadEB Gurenge Demon Slayer Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/J_8YqfMZZcM/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Shinzo wo Sasageyo (Cover)",
+                artist: "AmaLee • Attack on Titan OP",
+                category: 3,
+                query: "AmaLee Shinzo wo Sasageyo Attack on Titan English Cover",
+                thumbnail_url: "https://i.ytimg.com/vi/4vjVb6k_rXg/hqdefault.jpg",
+            },
+
+            // --- J-POP & VOCAL ---
+            PopularCardItem {
+                title: "唱 (Show)",
+                artist: "Ado • J-Pop Smash Hit",
+                category: 1,
+                query: "Ado 唱 Show Official Music Video",
+                thumbnail_url: "https://i.ytimg.com/vi/pgXpM4l_MwI/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "夜に駆ける (Racing)",
+                artist: "YOASOBI • J-Pop Anthem",
+                category: 1,
+                query: "YOASOBI 夜に駆ける Official Music Video",
+                thumbnail_url: "https://i.ytimg.com/vi/x8VYWazR5mE/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "うっせぇわ (Usseewa)",
+                artist: "Ado • Breakout J-Pop",
+                category: 1,
+                query: "Ado うっせぇわ Usseewa Official",
+                thumbnail_url: "https://i.ytimg.com/vi/Qp3b-RXtz4w/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "カワキヲアメク (Rain)",
+                artist: "Minami (美波) • Domestic GF",
+                category: 1,
+                query: "Minami カワキヲアメク Crying for Rain Official",
+                thumbnail_url: "https://i.ytimg.com/vi/0YF8vecQWYs/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "Lemon",
+                artist: "Kenshi Yonezu (米津玄師)",
+                category: 1,
+                query: "Kenshi Yonezu Lemon Official Music Video",
+                thumbnail_url: "https://i.ytimg.com/vi/SX_ViT4Ra7k/hqdefault.jpg",
+            },
+            PopularCardItem {
+                title: "真夜中のドア / Stay With Me",
+                artist: "Miki Matsubara • City Pop 80s",
+                category: 4,
+                query: "Miki Matsubara Stay With Me Official Audio",
+                thumbnail_url: "https://i.ytimg.com/vi/9GxP8b0XG5Y/hqdefault.jpg",
+            },
+        ];
+
+        let filtered_items: Vec<&PopularCardItem> = items
+            .iter()
+            .filter(|item| self.popular_category_filter == 0 || item.category == self.popular_category_filter)
+            .collect();
+
+        let avail_w = ui.available_width() - 32.0;
+        let card_w = 174.0_f32;
+        let card_h = 246.0_f32;
+        let spacing = 14.0_f32;
+        let cols = ((avail_w + spacing) / (card_w + spacing)).floor().max(2.0) as usize;
+
+        let mut trigger_query: Option<&'static str> = None;
+
+        for chunk in filtered_items.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                for item in chunk {
+                    let (card_rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), egui::Sense::click());
+                    let is_hovered = resp.hovered();
+
+                    // Spotify Card Background
+                    let bg_color = if is_hovered {
+                        Color32::from_rgb(42, 42, 42)
+                    } else {
+                        Color32::from_rgb(24, 24, 24)
+                    };
+                    ui.painter().rect_filled(card_rect, Rounding::same(8.0), bg_color);
+
+                    // Subtle border on hover
+                    if is_hovered {
+                        ui.painter().rect_stroke(card_rect, Rounding::same(8.0), egui::Stroke::new(1.0_f32, Color32::from_rgb(65, 65, 65)));
+                    }
+
+                    // Cover Art Area (148x148)
+                    let art_rect = egui::Rect::from_min_size(
+                        egui::pos2(card_rect.min.x + 13.0, card_rect.min.y + 12.0),
+                        Vec2::new(148.0, 148.0),
+                    );
+                    ui.painter().rect_filled(art_rect, Rounding::same(6.0), Color32::from_rgb(32, 32, 32));
+                    ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(32.0), Color32::from_rgb(70, 70, 70));
+
+                    ui.put(
+                        art_rect,
+                        egui::Image::new(item.thumbnail_url)
+                            .fit_to_exact_size(Vec2::new(148.0, 148.0))
+                            .rounding(Rounding::same(6.0)),
+                    );
+
+                    // Floating Green Play Button on Card Hover
+                    if is_hovered {
+                        let play_btn_center = egui::pos2(art_rect.max.x - 22.0, art_rect.max.y - 18.0);
+                        // Shadow
+                        ui.painter().circle_filled(
+                            egui::pos2(play_btn_center.x, play_btn_center.y + 2.0),
+                            20.0,
+                            Color32::from_black_alpha(140),
+                        );
+                        // Spotify Green Circle
+                        ui.painter().circle_filled(play_btn_center, 19.0, accent);
+                        // Black Play Triangle
+                        ui.painter().text(
+                            egui::pos2(play_btn_center.x + 1.5, play_btn_center.y),
+                            egui::Align2::CENTER_CENTER,
+                            "▶",
+                            FontId::proportional(17.0),
+                            Color32::BLACK,
+                        );
+                    }
+
+                    // Card Title
+                    let title_clipped = if item.title.chars().count() > 18 {
+                        format!("{}...", item.title.chars().take(16).collect::<String>())
+                    } else {
+                        item.title.to_string()
+                    };
+                    ui.painter().text(
+                        egui::pos2(card_rect.min.x + 13.0, art_rect.max.y + 16.0),
+                        egui::Align2::LEFT_CENTER,
+                        title_clipped,
+                        FontId::proportional(13.5),
+                        Color32::WHITE,
+                    );
+
+                    // Card Artist / Anime Tag
+                    let artist_clipped = if item.artist.chars().count() > 22 {
+                        format!("{}...", item.artist.chars().take(20).collect::<String>())
+                    } else {
+                        item.artist.to_string()
+                    };
+                    ui.painter().text(
+                        egui::pos2(card_rect.min.x + 13.0, art_rect.max.y + 34.0),
+                        egui::Align2::LEFT_CENTER,
+                        artist_clipped,
+                        FontId::proportional(11.5),
+                        Color32::from_rgb(160, 160, 160),
+                    );
+
+                    if resp.clicked() {
+                        trigger_query = Some(item.query);
+                    }
+
+                    ui.add_space(spacing);
+                }
+            });
+            ui.add_space(spacing);
+        }
+
+        if let Some(query) = trigger_query {
+            self.search_query = query.to_string();
+            self.current_tab = ViewTab::Search;
+            self.trigger_search(query);
+            self.show_toast("⚡ Reproduciendo selección...");
+        }
     }
 
     fn render_search_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
@@ -1334,6 +1696,667 @@ impl MelodyfyApp {
                 }
 
                 ui.label(egui::RichText::new(format!("{}:{:02}", cur_secs / 60, cur_secs % 60)).size(10.5).color(Color32::from_rgb(170, 170, 170)));
+            });
+        });
+    }
+
+    // =========================================================================================
+    // =============================== SPOTIFY MOBILE EDITION (9:16) ============================
+    // =========================================================================================
+
+    fn render_mobile_ui(&mut self, ctx: &egui::Context, accent: Color32) {
+        // Fullscreen Mobile Player View (BottomSheet / Now Playing Overlay)
+        if self.show_mobile_fullscreen_player {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                self.render_mobile_fullscreen_player(ui, accent);
+            });
+            return;
+        }
+
+        // 1. Mobile Bottom Navigation Bar (Fixed at the bottom)
+        egui::TopBottomPanel::bottom("mobile_bottom_nav")
+            .exact_height(56.0)
+            .show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let total_w = ui.available_width();
+                    let col_w = total_w / 3.0;
+
+                    let nav_tabs = [
+                        (ViewTab::Home, "🏠", "Inicio"),
+                        (ViewTab::Search, "🔍", "Buscar"),
+                        (ViewTab::Favorites, "📚", "Biblioteca"),
+                    ];
+
+                    for (tab, icon, label) in nav_tabs {
+                        let is_active = self.current_tab == tab;
+                        let text_color = if is_active { Color32::WHITE } else { Color32::from_rgb(140, 140, 140) };
+                        let icon_color = if is_active { accent } else { Color32::from_rgb(150, 150, 150) };
+
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(col_w - 4.0, 48.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                if ui.add(egui::Button::new(
+                                    egui::RichText::new(icon).size(18.0).color(icon_color)
+                                ).frame(false)).clicked() {
+                                    self.current_tab = tab;
+                                }
+                                if ui.add(egui::Button::new(
+                                    egui::RichText::new(label).size(10.5).color(text_color)
+                                ).frame(false)).clicked() {
+                                    self.current_tab = tab;
+                                }
+                            },
+                        );
+                    }
+                });
+            });
+
+        // 2. Sticky Floating Mini-Player (Right above Bottom Navigation)
+        let curr_track = self.current_track().cloned();
+        if let Some(ref t) = curr_track {
+            egui::TopBottomPanel::bottom("mobile_sticky_mini")
+                .exact_height(58.0)
+                .show(ctx, |ui| {
+                    self.render_mobile_sticky_mini_player(ui, t, accent);
+                });
+        }
+
+        // 3. Mobile Top Header
+        egui::TopBottomPanel::top("mobile_top_header")
+            .exact_height(46.0)
+            .show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new("🟢 Melodyfy").strong().size(16.0).color(Color32::WHITE));
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(12.0);
+
+                        // Button to switch back to PC/Desktop format
+                        if ui.add(egui::Button::new(egui::RichText::new("💻 PC").size(11.5).color(Color32::WHITE))
+                            .fill(Color32::from_rgb(40, 40, 40))
+                            .rounding(Rounding::same(12.0)))
+                            .on_hover_text("Cambiar a formato Escritorio (1150x740)")
+                            .clicked()
+                        {
+                            self.is_mobile_mode = false;
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1150.0, 740.0)));
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title("🎧 Melodyfy Rust".into()));
+                        }
+
+                        ui.add_space(6.0);
+
+                        let theme_sym = if self.use_spotify_green { "🟢" } else { "🟠" };
+                        if ui.small_button(theme_sym).on_hover_text("Cambiar color de acento").clicked() {
+                            self.use_spotify_green = !self.use_spotify_green;
+                        }
+                    });
+                });
+            });
+
+        // 4. Central Mobile Content
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                match self.current_tab {
+                    ViewTab::Home => self.render_mobile_home_view(ui, accent),
+                    ViewTab::Search => self.render_mobile_search_view(ui, accent),
+                    ViewTab::Favorites | ViewTab::History | ViewTab::Queue => self.render_mobile_library_view(ui, accent),
+                }
+            });
+        });
+    }
+
+    fn render_mobile_sticky_mini_player(&mut self, ui: &mut egui::Ui, track: &Track, accent: Color32) {
+        let status = self.audio.get_status();
+        let full_rect = ui.available_rect_before_wrap();
+
+        let card_rect = egui::Rect::from_min_max(
+            egui::pos2(full_rect.min.x + 6.0, full_rect.min.y + 2.0),
+            egui::pos2(full_rect.max.x - 6.0, full_rect.max.y - 2.0),
+        );
+
+        // Card surface with 8px rounding
+        ui.painter().rect_filled(card_rect, Rounding::same(8.0), Color32::from_rgb(34, 34, 34));
+
+        // Thin 2px bottom progress bar
+        let dur = if status.duration > 0.0 { status.duration } else { track.duration_seconds as f64 };
+        let ratio = if dur > 0.0 { (status.position / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let prog_rect = egui::Rect::from_min_size(
+            egui::pos2(card_rect.min.x + 4.0, card_rect.max.y - 2.5),
+            Vec2::new((card_rect.width() - 8.0) * ratio, 2.0),
+        );
+        ui.painter().rect_filled(prog_rect, Rounding::same(1.0), accent);
+
+        // Clicking anywhere on card opens full-screen player
+        let click_box = ui.allocate_rect(card_rect, egui::Sense::click());
+        if click_box.clicked() {
+            self.show_mobile_fullscreen_player = true;
+        }
+
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card_rect), |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.add_space(8.0);
+
+                // Miniature Thumbnail 40x40
+                let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(40.0, 40.0), egui::Sense::hover());
+                ui.painter().rect_filled(thumb_rect, Rounding::same(5.0), Color32::from_rgb(20, 20, 20));
+                if !track.thumbnail_url.is_empty() {
+                    ui.put(
+                        thumb_rect,
+                        egui::Image::new(&track.thumbnail_url)
+                            .fit_to_exact_size(Vec2::new(40.0, 40.0))
+                            .rounding(Rounding::same(5.0)),
+                    );
+                } else {
+                    ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(18.0), Color32::WHITE);
+                }
+
+                ui.add_space(8.0);
+
+                // Title + Artist
+                ui.vertical(|ui| {
+                    let title_clipped = if track.title.chars().count() > 18 {
+                        format!("{}...", track.title.chars().take(16).collect::<String>())
+                    } else {
+                        track.title.clone()
+                    };
+                    ui.label(egui::RichText::new(title_clipped).strong().size(12.5).color(Color32::WHITE));
+
+                    let artist_clipped = if track.artist.chars().count() > 20 {
+                        format!("{}...", track.artist.chars().take(18).collect::<String>())
+                    } else {
+                        track.artist.clone()
+                    };
+                    ui.label(egui::RichText::new(artist_clipped).size(10.5).color(Color32::from_rgb(160, 160, 160)));
+                });
+
+                // Right controls: Heart + Play/Pause
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+
+                    // Play/Pause button
+                    let is_playing = status.state == 3;
+                    let play_sym = if is_playing { "⏸" } else { "▶" };
+                    if ui.add(egui::Button::new(egui::RichText::new(play_sym).size(16.0).color(Color32::WHITE)).frame(false)).clicked() {
+                        self.audio.toggle_play_pause();
+                    }
+
+                    ui.add_space(8.0);
+
+                    // Heart button
+                    let is_fav = self.library.is_favorite(&track.id);
+                    let heart = if is_fav { "💚" } else { "🤍" };
+                    if ui.add(egui::Button::new(egui::RichText::new(heart).size(14.0)).frame(false)).clicked() {
+                        self.library.toggle_favorite(track.clone());
+                    }
+                });
+            });
+        });
+    }
+
+    fn render_mobile_fullscreen_player(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        let status = self.audio.get_status();
+        let curr_track = self.current_track().cloned();
+
+        ui.vertical_centered(|ui| {
+            ui.add_space(8.0);
+
+            // Top Header: Down arrow ⌄ + Title
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                if ui.add(egui::Button::new(egui::RichText::new("⌄").size(28.0).strong().color(Color32::WHITE)).frame(false))
+                    .on_hover_text("Minimizar").clicked()
+                {
+                    self.show_mobile_fullscreen_player = false;
+                }
+
+                let center_w = ui.available_width() - 48.0;
+                ui.allocate_ui_with_layout(Vec2::new(center_w, 36.0), egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("REPRODUCIENDO").size(9.0).color(Color32::GRAY));
+                    ui.label(egui::RichText::new("Melodyfy Mix").size(12.0).strong().color(Color32::WHITE));
+                });
+            });
+
+            ui.add_space(16.0);
+
+            // Large Album Artwork 280x280 px centered
+            let art_w = (ui.available_width() - 48.0).clamp(240.0, 310.0);
+            let (art_rect, _) = ui.allocate_exact_size(Vec2::new(art_w, art_w), egui::Sense::hover());
+            ui.painter().rect_filled(art_rect, Rounding::same(12.0), Color32::from_rgb(28, 28, 28));
+
+            if let Some(ref t) = curr_track {
+                if !t.thumbnail_url.is_empty() {
+                    ui.put(
+                        art_rect,
+                        egui::Image::new(&t.thumbnail_url)
+                            .fit_to_exact_size(Vec2::new(art_w, art_w))
+                            .rounding(Rounding::same(12.0)),
+                    );
+                } else {
+                    ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(64.0), Color32::WHITE);
+                }
+            } else {
+                ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎧", FontId::proportional(64.0), Color32::GRAY);
+            }
+
+            ui.add_space(20.0);
+
+            // Title & Artist + Favorite
+            if let Some(ref t) = curr_track {
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.vertical(|ui| {
+                        let title_clipped = if t.title.chars().count() > 24 {
+                            format!("{}...", t.title.chars().take(22).collect::<String>())
+                        } else {
+                            t.title.clone()
+                        };
+                        ui.label(egui::RichText::new(title_clipped).size(17.0).strong().color(Color32::WHITE));
+
+                        let artist_clipped = if t.artist.chars().count() > 28 {
+                            format!("{}...", t.artist.chars().take(26).collect::<String>())
+                        } else {
+                            t.artist.clone()
+                        };
+                        ui.label(egui::RichText::new(artist_clipped).size(13.0).color(Color32::from_rgb(175, 175, 175)));
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(24.0);
+                        let is_fav = self.library.is_favorite(&t.id);
+                        let heart = if is_fav { "💚" } else { "🤍" };
+                        if ui.add(egui::Button::new(egui::RichText::new(heart).size(22.0)).frame(false)).clicked() {
+                            self.library.toggle_favorite(t.clone());
+                        }
+                    });
+                });
+            }
+
+            ui.add_space(14.0);
+
+            // Full-width Seekbar
+            let cur_secs = status.position as u64;
+            let dur_secs = if status.duration > 0.0 {
+                status.duration as u64
+            } else if let Some(ref t) = curr_track {
+                t.duration_seconds
+            } else {
+                0
+            };
+            let max_dur = if dur_secs > 0 { dur_secs as f64 } else { 100.0 };
+
+            let seek_w = ui.available_width() - 48.0;
+            if let Some(new_pos) = Self::custom_spotify_seekbar(ui, status.position, max_dur, seek_w, accent) {
+                if self.last_seek_time.elapsed() > std::time::Duration::from_millis(150) {
+                    self.audio.seek(new_pos);
+                    self.last_seek_time = Instant::now();
+                }
+            }
+
+            // Timestamps
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.label(egui::RichText::new(format!("{}:{:02}", cur_secs / 60, cur_secs % 60)).size(11.0).color(Color32::GRAY));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(24.0);
+                    ui.label(egui::RichText::new(format!("{}:{:02}", dur_secs / 60, dur_secs % 60)).size(11.0).color(Color32::GRAY));
+                });
+            });
+
+            ui.add_space(18.0);
+
+            // Mobile Controls: Shuffle, Prev, Giant Play/Pause (58x58), Next, Repeat
+            ui.horizontal_centered(|ui| {
+                let controls_w = 260.0_f32;
+                let pad = ((ui.available_width() - controls_w) / 2.0).max(0.0);
+                ui.add_space(pad);
+
+                // Shuffle
+                let shuffle_col = if self.is_shuffle { accent } else { Color32::GRAY };
+                if ui.add(egui::Button::new(egui::RichText::new("🔀").size(20.0).color(shuffle_col)).frame(false)).clicked() {
+                    self.is_shuffle = !self.is_shuffle;
+                }
+
+                ui.add_space(16.0);
+
+                // Prev
+                if ui.add(egui::Button::new(egui::RichText::new("⏮").size(24.0).color(Color32::WHITE)).frame(false)).clicked() {
+                    self.play_prev();
+                }
+
+                ui.add_space(16.0);
+
+                // Giant Circular Play/Pause (58x58)
+                let is_playing = status.state == 3;
+                let play_sym = if is_playing { "⏸" } else { "▶" };
+                let play_btn = egui::Button::new(egui::RichText::new(play_sym).size(24.0).strong().color(Color32::BLACK))
+                    .fill(accent)
+                    .rounding(Rounding::same(29.0))
+                    .min_size(Vec2::new(58.0, 58.0));
+
+                if ui.add(play_btn).clicked() {
+                    self.audio.toggle_play_pause();
+                }
+
+                ui.add_space(16.0);
+
+                // Next
+                if ui.add(egui::Button::new(egui::RichText::new("⏭").size(24.0).color(Color32::WHITE)).frame(false)).clicked() {
+                    self.play_next();
+                }
+
+                ui.add_space(16.0);
+
+                // Repeat
+                let (rep_sym, rep_col) = match self.repeat_mode {
+                    RepeatMode::Off => ("🔁", Color32::GRAY),
+                    RepeatMode::All => ("🔁", accent),
+                    RepeatMode::One => ("🔂", accent),
+                };
+                if ui.add(egui::Button::new(egui::RichText::new(rep_sym).size(20.0).color(rep_col)).frame(false)).clicked() {
+                    self.repeat_mode = match self.repeat_mode {
+                        RepeatMode::Off => RepeatMode::All,
+                        RepeatMode::All => RepeatMode::One,
+                        RepeatMode::One => RepeatMode::Off,
+                    };
+                }
+            });
+
+            ui.add_space(22.0);
+
+            // Bottom Tools Row: Speaker & Volume + Queue button
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                let vol_icon = if self.volume == 0 { "🔇" } else if self.volume < 50 { "🔉" } else { "🔊" };
+                if ui.add(egui::Button::new(egui::RichText::new(vol_icon).size(15.0)).frame(false)).clicked() {
+                    if self.volume > 0 { self.volume = 0; } else { self.volume = 80; }
+                    self.audio.set_volume(self.volume);
+                }
+
+                ui.add_space(6.0);
+                if let Some(new_vol) = Self::custom_spotify_volume_bar(ui, self.volume, 120.0, accent) {
+                    self.volume = new_vol;
+                    self.audio.set_volume(new_vol);
+                    self.library.last_volume = Some(new_vol);
+                    self.library.save();
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(24.0);
+                    if ui.add(egui::Button::new(egui::RichText::new("📑").size(18.0).color(Color32::WHITE)).frame(false))
+                        .on_hover_text("Ver Cola").clicked()
+                    {
+                        self.show_mobile_fullscreen_player = false;
+                        self.current_tab = ViewTab::Queue;
+                    }
+                });
+            });
+        });
+    }
+
+    fn render_mobile_home_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        ui.add_space(10.0);
+
+        // Quick Category Chips (Horizontal Scroll)
+        let quick_tags = self.library.get_quick_tags();
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(12.0);
+            for tag in quick_tags.iter().take(6) {
+                let is_active = self.search_query == tag.query;
+                let bg_color = if is_active { accent } else { Color32::from_rgb(34, 34, 34) };
+                let text_color = if is_active { Color32::BLACK } else { Color32::from_rgb(220, 220, 220) };
+
+                let chip_btn = egui::Button::new(egui::RichText::new(&tag.label).size(11.5).strong().color(text_color))
+                    .fill(bg_color)
+                    .rounding(Rounding::same(14.0));
+
+                if ui.add(chip_btn).clicked() {
+                    self.search_query = tag.query.clone();
+                    self.current_tab = ViewTab::Search;
+                    self.trigger_search(&tag.query);
+                }
+                ui.add_space(4.0);
+            }
+        });
+
+        ui.add_space(14.0);
+
+        // 2x2 Curated Mixes (Spotify Mobile Card Style)
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("TUS MIXES").strong().size(13.0).color(Color32::WHITE));
+        });
+
+        let mixes = [
+            ("🎧 Lo-Fi Chill", "Lo-Fi Gaming Chill Beats"),
+            ("⚡ Synthwave", "Synthwave Cyberpunk 80s"),
+            ("🎸 Rock Clásico", "Rock Clásico 80s 90s"),
+            ("🔥 Top Global", "Top Éxitos Mundiales 2026"),
+        ];
+
+        let col_w = (ui.available_width() - 28.0) / 2.0;
+        for chunk in mixes.chunks(2) {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                for (title, query) in chunk {
+                    let card = egui::Button::new(egui::RichText::new(*title).strong().size(12.0).color(Color32::WHITE))
+                        .fill(Color32::from_rgb(38, 38, 38))
+                        .rounding(Rounding::same(6.0))
+                        .min_size(Vec2::new(col_w, 42.0));
+
+                    if ui.add(card).clicked() {
+                        self.search_query = query.to_string();
+                        self.current_tab = ViewTab::Search;
+                        self.trigger_search(query);
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+            ui.add_space(4.0);
+        }
+
+        ui.add_space(14.0);
+
+        // Trending Tracks Section
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("RECOMENDADO PARA TI").strong().size(13.0).color(Color32::WHITE));
+        });
+
+        let tracks = self.search_results.clone();
+        for (idx, track) in tracks.iter().enumerate().take(15) {
+            self.render_mobile_track_row(ui, track, idx, accent);
+        }
+    }
+
+    fn render_mobile_search_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        ui.add_space(10.0);
+
+        // Mobile Search Bar
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            let input_w = ui.available_width() - 70.0;
+            let response = ui.add_sized(
+                [input_w, 36.0],
+                egui::TextEdit::singleline(&mut self.search_query)
+                    .hint_text("🔍 ¿Qué te apetece escuchar?")
+                    .font(FontId::proportional(13.0))
+            );
+
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let q = self.search_query.clone();
+                self.trigger_search(&q);
+            }
+
+            if ui.add(egui::Button::new(egui::RichText::new("Buscar").strong().size(12.0).color(Color32::BLACK))
+                .fill(accent)
+                .rounding(Rounding::same(8.0))
+                .min_size(Vec2::new(50.0, 36.0)))
+                .clicked()
+            {
+                let q = self.search_query.clone();
+                self.trigger_search(&q);
+            }
+        });
+
+        ui.add_space(10.0);
+
+        if self.is_searching {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.spinner();
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("Buscando en YouTube...").color(accent));
+            });
+        }
+
+        let tracks = self.search_results.clone();
+        for (idx, track) in tracks.iter().enumerate() {
+            self.render_mobile_track_row(ui, track, idx, accent);
+        }
+    }
+
+    fn render_mobile_library_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        ui.add_space(10.0);
+
+        // Subtab pills: Me Gusta / Historial / Cola
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+
+            let subtabs = [
+                (0, format!("💚 Me Gusta ({})", self.library.favorites.len())),
+                (1, "🕒 Historial".to_string()),
+                (2, format!("📑 Cola ({})", self.queue.len())),
+            ];
+
+            for (idx, label) in subtabs {
+                let is_active = self.mobile_library_subtab == idx;
+                let bg_col = if is_active { accent } else { Color32::from_rgb(32, 32, 32) };
+                let txt_col = if is_active { Color32::BLACK } else { Color32::WHITE };
+
+                let pill = egui::Button::new(egui::RichText::new(label).size(11.0).strong().color(txt_col))
+                    .fill(bg_col)
+                    .rounding(Rounding::same(12.0));
+
+                if ui.add(pill).clicked() {
+                    self.mobile_library_subtab = idx;
+                }
+                ui.add_space(4.0);
+            }
+        });
+
+        ui.add_space(12.0);
+
+        match self.mobile_library_subtab {
+            0 => {
+                let favs = self.library.favorites.clone();
+                if favs.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        ui.label(egui::RichText::new("Aún no tienes canciones favoritas. Pulsa 🤍 para guardar.").color(Color32::GRAY));
+                    });
+                }
+                for (idx, track) in favs.iter().enumerate() {
+                    self.render_mobile_track_row(ui, track, idx, accent);
+                }
+            }
+            1 => {
+                let hist = self.library.history.clone();
+                for (idx, track) in hist.iter().enumerate() {
+                    self.render_mobile_track_row(ui, track, idx, accent);
+                }
+            }
+            _ => {
+                let q = self.queue.clone();
+                for (idx, track) in q.iter().enumerate() {
+                    self.render_mobile_track_row(ui, track, idx, accent);
+                }
+            }
+        }
+    }
+
+    fn render_mobile_track_row(&mut self, ui: &mut egui::Ui, track: &Track, idx: usize, accent: Color32) {
+        let is_current = self.current_track().map_or(false, |t| t.id == track.id);
+        let row_height = 54.0;
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), egui::Sense::click());
+
+        let bg_color = if is_current {
+            Color32::from_rgb(26, 40, 30)
+        } else if response.hovered() {
+            Color32::from_rgb(34, 34, 34)
+        } else {
+            Color32::TRANSPARENT
+        };
+
+        ui.painter().rect_filled(rect, Rounding::same(6.0), bg_color);
+
+        if response.clicked() {
+            self.play_track_now(track.clone());
+        }
+
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.add_space(8.0);
+
+                // Index or Playing indicator
+                let num_str = format!("{:02}", idx + 1);
+                let (icon_sym, icon_col) = if is_current {
+                    if self.audio.get_status().state == 3 {
+                        ("⏸", accent)
+                    } else {
+                        ("▶", accent)
+                    }
+                } else {
+                    (num_str.as_str(), Color32::GRAY)
+                };
+                ui.add_sized([18.0, row_height], egui::Label::new(egui::RichText::new(icon_sym).size(11.0).color(icon_col)));
+
+                ui.add_space(6.0);
+
+                // Thumbnail 42x42
+                let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(42.0, 42.0), egui::Sense::hover());
+                ui.painter().rect_filled(thumb_rect, Rounding::same(4.0), Color32::from_rgb(24, 24, 24));
+                if !track.thumbnail_url.is_empty() {
+                    ui.put(
+                        thumb_rect,
+                        egui::Image::new(&track.thumbnail_url)
+                            .fit_to_exact_size(Vec2::new(42.0, 42.0))
+                            .rounding(Rounding::same(4.0)),
+                    );
+                } else {
+                    ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(16.0), Color32::WHITE);
+                }
+
+                ui.add_space(8.0);
+
+                // Title + Artist
+                ui.vertical(|ui| {
+                    let title_col = if is_current { accent } else { Color32::WHITE };
+                    let title_clipped = if track.title.chars().count() > 22 {
+                        format!("{}...", track.title.chars().take(20).collect::<String>())
+                    } else {
+                        track.title.clone()
+                    };
+                    ui.label(egui::RichText::new(title_clipped).strong().size(12.5).color(title_col));
+
+                    let artist_clipped = if track.artist.chars().count() > 24 {
+                        format!("{}...", track.artist.chars().take(22).collect::<String>())
+                    } else {
+                        track.artist.clone()
+                    };
+                    ui.label(egui::RichText::new(artist_clipped).size(10.5).color(Color32::from_rgb(160, 160, 160)));
+                });
+
+                // Favorite button on right
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+                    let is_fav = self.library.is_favorite(&track.id);
+                    let heart = if is_fav { "💚" } else { "🤍" };
+                    if ui.add(egui::Button::new(egui::RichText::new(heart).size(15.0)).frame(false)).clicked() {
+                        self.library.toggle_favorite(track.clone());
+                    }
+                });
             });
         });
     }
