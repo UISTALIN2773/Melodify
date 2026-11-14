@@ -1,25 +1,19 @@
-# Task Plan: Melodyfy Rust - High-Performance Spotify-Alternative Music Player
+# Task Plan: Versión Móvil de Melodyfy (Spotify Mobile Rust)
 
-## 1. Goal
-Build a blazing-fast, free, ad-free desktop music player in Rust that outperforms Spotify in memory footprint (<25 MB RAM vs 600+ MB), startup time (<100 ms), and user freedom, streaming high quality audio from YouTube.
+## Objetivo
+Crear una versión móvil nativa y completa de Melodyfy basada en la versión actual:
+1. **Motor InnerTube en Rust Puro (`src/innertube.rs`):** Extracción de streaming de audio directa vía HTTP (sin dependencia de `yt-dlp.exe` de Python, latencia ~120ms).
+2. **Arquitectura y UI Spotify Mobile (9:16 Portrait):**
+   - Viewport vertical calibrado (390×820 px).
+   - Barra de navegación inferior móvil fija (🏠 Inicio, 🔍 Buscar, 📚 Tu Biblioteca).
+   - Mini-Player flotante sticky sobre la barra de navegación con toque para expandir.
+   - Pantalla completa de reproducción móvil (*BottomSheet / Fullscreen Player*): Carátula grande 280×280, tipografía móvil, barra de progreso táctil completa, botones grandes y controles de audio.
+3. **Binario Dedicado Móvil:** `Melodyfy-Mobile.exe` configurado en resolución smartphone, conmutador en tiempo real entre modo escritorio y móvil, y lanzador `iniciar_melodyfy_mobile.bat`.
+4. **Soporte Android NDK / Cargo-APK:** Configuración de `Cargo.toml` y manifiesto para compilación cruzada hacia APK.
 
-## 2. Architecture & Components
-- **Language & Runtime:** Rust (2021 edition), native Windows MSVC build.
-- **GUI Engine:** `eframe` / `egui` (Immediate-mode native GUI, hardware accelerated, customizable theme, ultra-low resource usage).
-- **Audio Engine:** `WmpAudioEngine` COM direct hardware acceleration backend in Rust (IDispatch Win32 COM, hardware decoding, 0% CPU, pause/seek/volume/loop).
-- **Music Resolver & Streamer:** Asynchronous worker integrating `yt-dlp` for metadata, streaming URLs, thumbnails, and cache management.
-- **Features:**
-  - Real-time search (songs, artists, albums, playlists).
-  - Queue management (Next, Previous, Loop/Repeat, Shuffle).
-  - Local favorites & history persistence (`library.json`).
-  - Sleek modern UI (Spotify Dark style, interactive seekbar, volume slider).
-  - Hotkeys (Space to toggle, arrows to seek/skip).
-
-## 3. Milestones
-- [x] Phase 1: Environment & dependency verification (Rust, yt-dlp, cargo).
-- [x] Phase 2: Audio engine & COM WMP stream resolver verification.
-- [x] Phase 3: Core data structures (Track, Playlist, AppLibrary, RepeatMode).
-- [x] Phase 4: UI layout & modern styling (Sidebar, Search, TrackList, PlayerBar).
-- [x] Phase 5: Asynchronous background worker (Search & Stream pipeline).
-- [x] Phase 6: Favorites, History & Mini-player mode.
-- [x] Phase 7: Optimization (LTO, strip, opt-level 3), release binary deployed (`Melodyfy-Rust.exe`).
+## Fases
+- [ ] Fase 1: Implementar módulo InnerTube en Rust (`src/innertube.rs`) para extracción autónoma sin Python.
+- [ ] Fase 2: Implementar la UI completa de Spotify Mobile en `src/app.rs` (Bottom Nav, Sticky Mini-player, Fullscreen Now-Playing View).
+- [ ] Fase 3: Agregar binario dedicado `melodyfy-mobile` y comando de arranque `--mobile` en `main.rs`.
+- [ ] Fase 4: Compilar `Melodyfy-Mobile.exe` y `Melodyfy-Rust.exe`, probar navegación y verificar que no haya errores.
+- [ ] Fase 5: Crear lanzador `.bat` y documentar en `findings.md` y `progress.md`.

@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod innertube;
 mod models;
 mod streamer;
 

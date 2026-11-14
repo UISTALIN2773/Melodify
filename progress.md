@@ -39,3 +39,8 @@
   - Anchored right controls (`🕹️`, `📑`, volume slider, `🔊`) directly to window right margin (`Layout::right_to_left`), completely eliminating the blank right gap.
   - Expanded seekbar from cramped 100px to full-width centered slider (280-560px) with always-visible tactile circular thumb knob and smooth hover expansion.
 - [x] Recompiled and redeployed rock-solid optimized release binary `Melodyfy-Rust.exe`.
+- [x] Implemented persistent disk caching (`cache/stream_cache.json`) for audio streaming URLs with 5-hour TTL (0ms instant playback on repeat, favorites, and history).
+- [x] Added smart hover prefetching in `render_track_table` (pre-resolves stream before the user even clicks).
+- [x] Added `cache/ytdlp` shared cache-dir, `--force-ipv4`, and `--socket-timeout 5` for network acceleration.
+- [x] Added dynamic reactive row loading feedback (`⏳`) on track click.
+- [x] Deployed high-speed release binary to `Melodyfy-Rust.exe`.

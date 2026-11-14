@@ -797,6 +797,11 @@ impl MelodyfyApp {
                 ui.painter().rect_stroke(rect, Rounding::same(6.0), egui::Stroke::new(1.0_f32, Color32::from_rgb(55, 55, 55)));
             }
 
+            // Hover Prefetching: Start resolving audio stream as soon as cursor hovers!
+            if response.hovered() {
+                self.streamer.prefetch_stream_url(track);
+            }
+
             let clicked_actions = response.hover_pos().map_or(false, |p| p.x > rect.max.x - 120.0);
             if (response.clicked() && !clicked_actions) || response.double_clicked() {
                 self.play_track_now(track.clone());
@@ -807,10 +812,16 @@ impl MelodyfyApp {
             row_ui.horizontal(|ui| {
                 ui.add_space(10.0);
 
-                // Play / Index Icon
+                // Play / Index Icon with real-time responsive state
                 let num_str_buf = format!("{:02}", idx + 1);
                 let (num_str, num_color) = if is_current {
-                    ("▶", accent)
+                    if self.is_loading_stream {
+                        ("⏳", accent)
+                    } else if self.audio.get_status().state == 3 {
+                        ("⏸", accent)
+                    } else {
+                        ("▶", accent)
+                    }
                 } else if response.hovered() {
                     ("▶", Color32::WHITE)
                 } else {

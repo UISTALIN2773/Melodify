@@ -1,18 +1,22 @@
 use crate::models::Track;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const CACHE_FILE: &str = "cache/stream_cache.json";
+const CACHE_TTL_SECS: u64 = 18000; // 5 hours (googlevideo streams remain valid for 6 hours)
 
 pub struct Streamer {
     yt_dlp_path: PathBuf,
     stream_cache: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Streamer {
@@ -29,17 +33,68 @@ impl Streamer {
             .cloned()
             .unwrap_or_else(|| PathBuf::from("yt-dlp.exe"));
 
-        let _ = std::fs::create_dir_all("cache/thumbs");
+        let _ = fs::create_dir_all("cache/thumbs");
+        let _ = fs::create_dir_all("cache/ytdlp");
+
+        // Load persistent disk cache from previous sessions
+        let initial_cache = Self::load_disk_cache();
 
         Self {
             yt_dlp_path,
-            stream_cache: Arc::new(Mutex::new(HashMap::new())),
+            stream_cache: Arc::new(Mutex::new(initial_cache)),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    fn load_disk_cache() -> HashMap<String, (String, Instant)> {
+        let mut map = HashMap::new();
+        let path = Path::new(CACHE_FILE);
+        if let Ok(data) = fs::read_to_string(path) {
+            if let Ok(raw_map) = serde_json::from_str::<HashMap<String, (String, u64)>>(&data) {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                for (id, (url, created_at)) in raw_map {
+                    if now >= created_at && (now - created_at) < CACHE_TTL_SECS {
+                        let age = now - created_at;
+                        let inst = Instant::now()
+                            .checked_sub(Duration::from_secs(age))
+                            .unwrap_or_else(Instant::now);
+                        map.insert(id, (url, inst));
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    fn persist_to_disk(cache_arc: &Arc<Mutex<HashMap<String, (String, Instant)>>>) {
+        if let Ok(cache) = cache_arc.lock() {
+            let now_sys = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let now_inst = Instant::now();
+            let mut raw_map = HashMap::new();
+            for (id, (url, inst)) in cache.iter() {
+                let elapsed = now_inst.saturating_duration_since(*inst).as_secs();
+                if elapsed < CACHE_TTL_SECS {
+                    let created_at = now_sys.saturating_sub(elapsed);
+                    raw_map.insert(id.clone(), (url.clone(), created_at));
+                }
+            }
+            let _ = fs::create_dir_all("cache");
+            if let Ok(json) = serde_json::to_string(&raw_map) {
+                let _ = fs::write(CACHE_FILE, json);
+            }
         }
     }
 
     pub fn search_async(&self, query: String, tx: Sender<Vec<Track>>) {
         let yt_path = self.yt_dlp_path.clone();
         let cache_clone = self.stream_cache.clone();
+        let in_flight_clone = self.in_flight.clone();
 
         std::thread::spawn(move || {
             let mut tracks = Vec::new();
@@ -51,6 +106,12 @@ impl Streamer {
                 "--flat-playlist".to_string(),
                 "--no-warnings".to_string(),
                 "--skip-download".to_string(),
+                "--no-check-certificates".to_string(),
+                "--force-ipv4".to_string(),
+                "--socket-timeout".to_string(),
+                "5".to_string(),
+                "--cache-dir".to_string(),
+                "cache/ytdlp".to_string(),
                 "--extractor-args".to_string(),
                 "youtube:player_client=android".to_string(),
             ];
@@ -119,9 +180,9 @@ impl Streamer {
                                     let to_prefetch = track.clone();
                                     tracks.push(track);
 
-                                    // Auto-prefetch first 3 tracks in background for instant 0ms click
-                                    if tracks.len() <= 3 {
-                                        Self::prefetch_internal(yt_path.clone(), cache_clone.clone(), to_prefetch);
+                                    // Auto-prefetch top result immediately for instant 0ms first click
+                                    if tracks.len() == 1 {
+                                        Self::prefetch_internal(yt_path.clone(), cache_clone.clone(), in_flight_clone.clone(), to_prefetch);
                                     }
 
                                     // Incremental updates for instant response (< 0.5s)
@@ -141,20 +202,53 @@ impl Streamer {
     }
 
     pub fn prefetch_stream_url(&self, track: &Track) {
-        Self::prefetch_internal(self.yt_dlp_path.clone(), self.stream_cache.clone(), track.clone());
+        Self::prefetch_internal(
+            self.yt_dlp_path.clone(),
+            self.stream_cache.clone(),
+            self.in_flight.clone(),
+            track.clone(),
+        );
     }
 
-    fn prefetch_internal(yt_path: PathBuf, streamer_clone: Arc<Mutex<HashMap<String, (String, Instant)>>>, track_clone: Track) {
+    fn prefetch_internal(
+        yt_path: PathBuf,
+        cache_clone: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+        in_flight_clone: Arc<Mutex<HashSet<String>>>,
+        track_clone: Track,
+    ) {
+        // Fast path: if already in cache with valid TTL, return immediately
+        if let Ok(cache) = cache_clone.lock() {
+            if let Some((_, ts)) = cache.get(&track_clone.id) {
+                if ts.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
+                    return;
+                }
+            }
+        }
+
+        // Avoid duplicate concurrent workers for the same track
+        if let Ok(mut in_flight) = in_flight_clone.lock() {
+            if in_flight.contains(&track_clone.id) {
+                return;
+            }
+            in_flight.insert(track_clone.id.clone());
+        }
+
         std::thread::spawn(move || {
-            // If already in cache, do nothing
-            if let Ok(cache) = streamer_clone.lock() {
-                if let Some((_, ts)) = cache.get(&track_clone.id) {
-                    if ts.elapsed() < Duration::from_secs(4 * 3600) {
-                        return;
+            // Priority 1: Fast Pure-Rust InnerTube resolution (~120ms, no child process)
+            if let Some(stream_url) = crate::innertube::InnerTube::resolve_stream_url(&track_clone.id) {
+                if !stream_url.is_empty() {
+                    if let Ok(mut cache) = cache_clone.lock() {
+                        cache.insert(track_clone.id.clone(), (stream_url, Instant::now()));
                     }
+                    Self::persist_to_disk(&cache_clone);
+                    if let Ok(mut in_flight) = in_flight_clone.lock() {
+                        in_flight.remove(&track_clone.id);
+                    }
+                    return;
                 }
             }
 
+            // Priority 2: Fallback to yt-dlp binary if available
             let url_to_resolve = if track_clone.webpage_url.is_empty() {
                 format!("https://www.youtube.com/watch?v={}", track_clone.id)
             } else {
@@ -167,6 +261,13 @@ impl Streamer {
                 "-f",
                 "bestaudio[ext=m4a]/bestaudio/best",
                 "--no-warnings",
+                "--no-playlist",
+                "--no-check-certificates",
+                "--force-ipv4",
+                "--socket-timeout",
+                "5",
+                "--cache-dir",
+                "cache/ytdlp",
                 "--extractor-args",
                 "youtube:player_client=android",
                 &url_to_resolve,
@@ -185,23 +286,39 @@ impl Streamer {
                         .to_string();
 
                     if !stream_url.is_empty() {
-                        if let Ok(mut cache) = streamer_clone.lock() {
-                            cache.insert(track_clone.id, (stream_url, Instant::now()));
+                        if let Ok(mut cache) = cache_clone.lock() {
+                            cache.insert(track_clone.id.clone(), (stream_url, Instant::now()));
                         }
+                        Self::persist_to_disk(&cache_clone);
                     }
                 }
+            }
+
+            if let Ok(mut in_flight) = in_flight_clone.lock() {
+                in_flight.remove(&track_clone.id);
             }
         });
     }
 
     pub fn resolve_stream_url(&self, track: &Track) -> Option<String> {
-        // Check cache (TTL 4 hours)
+        // Instant check in persistent cache (0.0001 ms)
         {
             let cache = self.stream_cache.lock().ok()?;
             if let Some((url, timestamp)) = cache.get(&track.id) {
-                if timestamp.elapsed() < Duration::from_secs(4 * 3600) {
+                if timestamp.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
                     return Some(url.clone());
                 }
+            }
+        }
+
+        // Fast pure-Rust InnerTube resolution (~120 ms, no subprocess)
+        if let Some(stream_url) = crate::innertube::InnerTube::resolve_stream_url(&track.id) {
+            if !stream_url.is_empty() {
+                if let Ok(mut cache) = self.stream_cache.lock() {
+                    cache.insert(track.id.clone(), (stream_url.clone(), Instant::now()));
+                }
+                Self::persist_to_disk(&self.stream_cache);
+                return Some(stream_url);
             }
         }
 
@@ -217,6 +334,13 @@ impl Streamer {
             "-f",
             "bestaudio[ext=m4a]/bestaudio/best",
             "--no-warnings",
+            "--no-playlist",
+            "--no-check-certificates",
+            "--force-ipv4",
+            "--socket-timeout",
+            "5",
+            "--cache-dir",
+            "cache/ytdlp",
             "--extractor-args",
             "youtube:player_client=android",
             &url_to_resolve,
@@ -237,6 +361,7 @@ impl Streamer {
                 if let Ok(mut cache) = self.stream_cache.lock() {
                     cache.insert(track.id.clone(), (stream_url.clone(), Instant::now()));
                 }
+                Self::persist_to_disk(&self.stream_cache);
                 return Some(stream_url);
             }
         }
