@@ -3,11 +3,26 @@
 mod app;
 mod audio;
 mod innertube;
+mod lyrics;
 mod models;
 mod streamer;
 
 use app::MelodyfyApp;
-use eframe::egui::Vec2;
+use eframe::egui::{IconData, Vec2};
+use std::sync::Arc;
+
+pub const APP_LOGO_BYTES: &[u8] = include_bytes!("../assets/logo.jpg");
+pub const APP_LOGO_URI: &str = "bytes://melodyfy_logo.jpg";
+
+fn load_app_icon() -> Option<Arc<IconData>> {
+    let img = image::load_from_memory(APP_LOGO_BYTES).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some(Arc::new(IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }))
+}
 
 fn main() -> eframe::Result<()> {
     // Robust crash protection & logging
@@ -33,12 +48,18 @@ fn main() -> eframe::Result<()> {
         )
     };
 
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_inner_size(initial_size)
+        .with_min_inner_size(Vec2::new(320.0, 480.0))
+        .with_active(true);
+
+    if let Some(icon) = load_app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_inner_size(initial_size)
-            .with_min_inner_size(Vec2::new(320.0, 480.0))
-            .with_active(true),
+        viewport,
         ..Default::default()
     };
 
@@ -67,6 +88,7 @@ fn main() -> eframe::Result<()> {
             cc.egui_ctx.set_fonts(fonts);
 
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            cc.egui_ctx.include_bytes(APP_LOGO_URI, APP_LOGO_BYTES);
             Ok(Box::new(MelodyfyApp::new(cc, is_mobile)))
         }),
     )

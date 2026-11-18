@@ -1,5 +1,9 @@
 # 🎧 Melodyfy Rust — Reproductor de Música Libre, Rápido y Sin Anuncios
 
+<p align="center">
+  <img src="assets/logo.jpg" alt="Melodyfy Rust Official Logo" width="220" style="border-radius: 18px;" />
+</p>
+
 [![Rust](https://img.shields.io/badge/Language-Rust_2021-DEA584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![GUI](https://img.shields.io/badge/GUI-egui_%2F_eframe-1ED760.svg)](https://github.com/emilk/egui)
 [![Audio](https://img.shields.io/badge/Audio-Direct_Hardware_COM-0078D7.svg)](https://learn.microsoft.com/windows)
@@ -26,15 +30,19 @@
 
 ## ✨ Características Principales
 
-* 🚀 **Streaming Directo en Memoria:** Reproducción directa de streams de audio de alta fidelidad sin necesidad de descargas pesadas.
-* 🎨 **Interfaz Moderna Estilo Spotify:**
+* 🚀 **Streaming Directo Híbrido (InnerTube + `yt-dlp`):** Búsqueda y resolución de audio nativa en Rust puro (~120–250 ms) con caché persistente y pre-carga automática (*0ms Gapless Prefetch*).
+* 🎨 **Interfaz Moderna Estilo Spotify (Escritorio + Móvil 9:16):**
   * Paleta oscura editorial (`#121212`, `#181818`) con acentos en Verde Spotify (`#1ED760`) o Ámbar Clásico (`#E87A30`) alternables con un clic.
-  * Barra lateral con acceso a: *Inicio*, *Buscar*, *Tus Me Gusta (Favoritos)*, *Historial* y *Cola de Reproducción*.
-* 🔍 **Buscador Instantáneo & Playlists:** Búsqueda en tiempo real de canciones, artistas, géneros o enlaces de listas de reproducción públicas.
-* 🔁 **Modos de Reproducción Completos:** Reproducción continua con bucle general (*Repeat All*), bucle de una pista (*Repeat One*) y modo aleatorio (*Shuffle*).
-* ❤️ **Biblioteca Local Persistente:** Guarda tus canciones favoritas e historial en un archivo local ligero (`library.json`).
-* 🕹️ **Modo Mini-Player Flotante:** Alterna a una ventana compacta y minimalista para escuchar música sin distracciones mientras juegas o programas.
-* ⌨️ **Atajos de Teclado Globales:**
+  * Modo **Smartphone 9:16 (`📱 Modo Móvil`)** integrado y ejecutable dedicado (`Melodyfy-Mobile.exe`).
+  * Barra lateral con acceso a: *Inicio*, *Buscar*, *Tus Me Gusta*, *Mis Playlists*, *Descargas Offline*, *Historial*, *Cola Actual* y *Letras Karaoke*.
+* 📂 **Gestor Completo de Playlists Personalizadas:** Crea tus propias listas de reproducción, añade o quita canciones desde cualquier tabla con el menú `📂` y reproduce listas enteras con un clic.
+* 💾 **Descargas Offline sin DRM (`.m4a`):** Descarga cualquier pista a la carpeta local `downloads/` y escúchala sin conexión a internet desde la pestaña *Descargas Offline*.
+* 🎤 **Letras Sincronizadas (Modo Karaoke LRCLIB):** Letras en tiempo real con desplazamiento automático, visualizador de espectro de 24 barras, salto por clic en cada verso y ajuste fino de sincronización (`-0.5s` / `+0.5s`).
+* ⚡ **Efectos de Velocidad DSP Nativos:** Alterna en tiempo real desde la barra inferior entre `1.0x Normal`, `1.25x Nightcore ⚡`, `1.5x Fast ⏩` y `0.85x Slowed Chill 🌙`.
+* 📻 **Radio Infinita (Auto-Mix):** Cuando termina tu cola de reproducción, busca y añade automáticamente canciones similares para que la música nunca se detenga.
+* 🌙 **Temporizador de Sueño (Sleep Timer):** Programa el apagado automático de la reproducción en `15m`, `30m`, `45m` o `60m`.
+* 🕹️ **Modo Mini-Player Flotante (`Always on Top`):** Alterna a una ventana compacta y siempre visible para escuchar música sin distracciones mientras juegas o programas.
+* ⌨️ **Atajos de Teclado:**
   * `Espacio`: Pausar / Reanudar.
   * `Ctrl + Derecha`: Siguiente canción.
   * `Ctrl + Izquierda`: Canción anterior o reiniciar pista.

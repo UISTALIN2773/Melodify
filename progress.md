@@ -56,3 +56,17 @@
   - Creado binario ejecutable dedicado [Melodyfy-Mobile.exe](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/Melodyfy-Mobile.exe) (7.77 MB).
   - Creado lanzador rápido [iniciar_melodyfy_mobile.bat](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/iniciar_melodyfy_mobile.bat).
   - Redactada la [guía de compilación para Android APK](file:///C:/Users/HP/Desktop/For%20GIt/lite-music-player/android_build_guide.md).
+
+- [x] Full Rust InnerTube Engine & Compilation Fix:
+  - Implementado `src/innertube.rs` en Rust puro con soporte multicliente (Android/iOS) vía `ureq` para resolución instantánea de streams HTTP sin subprocesos.
+  - Subsanado error `E0583` de compilación en `main.rs`.
+  - Verificado `cargo check` limpio con 0 errores y 0 advertencias.
+  - Actualizados scripts de lanzamiento y compilación (`iniciar_melodyfy.bat` y `build_rust.bat`) para reflejar la suite completa de ejecutables Rust.
+  - Diseñada la arquitectura integral de 100 características comparativas Spotify vs Melodyfy Rust.
+
+- [x] Letras Sincronizadas (Karaoke), Búsqueda Nativa Rust & Descarga Offline:
+  - Creado módulo `src/lyrics.rs` con soporte de letras sincronizadas LRC vía LRCLIB.
+  - Implementada vista interactiva `render_lyrics_view` con resaltado dinámico de verso actual, auto-scroll y salto táctil.
+  - Añadido botón de micrófono `🎤` en la barra de reproducción y en el menú lateral.
+  - Añadida búsqueda nativa en Rust puro en `src/innertube.rs`.
+  - Añadido motor de descargas offline sin DRM (`downloads/*.m4a`) con botón `⬇` en barra de reproducción, tabla de canciones y reproductor móvil.

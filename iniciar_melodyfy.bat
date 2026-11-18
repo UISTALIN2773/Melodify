@@ -1,3 +1,3 @@
 @echo off
-start Melodyfy.exe
+start "" "%~dp0Melodyfy-Rust.exe"
 exit

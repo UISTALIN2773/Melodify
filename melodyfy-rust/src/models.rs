@@ -64,9 +64,14 @@ impl QuickTag {
 pub struct AppLibrary {
     pub favorites: Vec<Track>,
     pub history: Vec<Track>,
+    #[serde(default)]
     pub playlists: HashMap<String, Vec<Track>>,
+    #[serde(default)]
+    pub downloads: Vec<Track>,
     pub last_volume: Option<i32>,
     pub quick_tags: Option<Vec<QuickTag>>,
+    #[serde(default)]
+    pub auto_radio: Option<bool>,
 }
 
 impl AppLibrary {
@@ -133,5 +138,96 @@ impl AppLibrary {
             self.history.truncate(100);
         }
         self.save();
+    }
+
+    pub fn create_playlist(&mut self, name: String) -> bool {
+        let clean = name.trim().to_string();
+        if clean.is_empty() || self.playlists.contains_key(&clean) {
+            return false;
+        }
+        self.playlists.insert(clean, Vec::new());
+        self.save();
+        true
+    }
+
+    pub fn delete_playlist(&mut self, name: &str) {
+        if self.playlists.remove(name).is_some() {
+            self.save();
+        }
+    }
+
+    pub fn add_to_playlist(&mut self, playlist_name: &str, track: Track) -> bool {
+        let entry = self.playlists.entry(playlist_name.to_string()).or_default();
+        if !entry.iter().any(|t| t.id == track.id) {
+            entry.push(track);
+            self.save();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_from_playlist(&mut self, playlist_name: &str, track_id: &str) {
+        if let Some(list) = self.playlists.get_mut(playlist_name) {
+            list.retain(|t| t.id != track_id);
+            self.save();
+        }
+    }
+
+    pub fn record_download(&mut self, mut track: Track, local_path: String) {
+        track.webpage_url = format!("local:{}", local_path);
+        self.downloads.retain(|t| t.id != track.id && t.webpage_url != track.webpage_url);
+        self.downloads.insert(0, track);
+        self.save();
+    }
+
+    pub fn scan_local_downloads(&mut self) {
+        let dir = Path::new("downloads");
+        if !dir.exists() {
+            return;
+        }
+        let mut changed = false;
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    if matches!(ext.as_str(), "m4a" | "mp3" | "wav" | "ogg" | "flac" | "aac") {
+                        let path_str = path.to_string_lossy().to_string();
+                        let local_url = format!("local:{}", path_str);
+                        if !self.downloads.iter().any(|t| t.webpage_url == local_url) {
+                            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Audio Local");
+                            let (artist, title) = if let Some((a, t)) = stem.split_once(" - ") {
+                                (a.trim().to_string(), t.trim().to_string())
+                            } else {
+                                ("Archivo Local".to_string(), stem.to_string())
+                            };
+                            self.downloads.push(Track {
+                                id: format!("local_{}", stem),
+                                title,
+                                artist,
+                                duration: "Offline".to_string(),
+                                duration_seconds: 0,
+                                thumbnail_url: String::new(),
+                                webpage_url: local_url,
+                            });
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        // Remove entries whose local file no longer exists
+        let before_len = self.downloads.len();
+        self.downloads.retain(|t| {
+            if let Some(local_path) = t.webpage_url.strip_prefix("local:") {
+                Path::new(local_path).exists()
+            } else {
+                true
+            }
+        });
+        if changed || self.downloads.len() != before_len {
+            self.save();
+        }
     }
 }

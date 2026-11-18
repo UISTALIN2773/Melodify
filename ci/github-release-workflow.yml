@@ -1,0 +1,97 @@
+name: 🚀 Auto Build & Release — Melodyfy Rust
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Windows x64 Native & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🦀 Setup Rust Toolchain (Stable MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: ⚡ Rust Cargo Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "melodyfy-rust -> target"
+
+      - name: 🔨 Compile Melodyfy Rust (Release LTO Optimized)
+        working-directory: melodyfy-rust
+        run: cargo build --release
+
+      - name: 📦 Prepare Release Binaries & Portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist/Melodyfy-Rust" | Out-Null
+          Copy-Item "melodyfy-rust/target/release/melodyfy-rust.exe" "Melodyfy-Rust.exe" -Force
+          Copy-Item "melodyfy-rust/target/release/melodyfy-rust.exe" "Melodyfy-Mobile.exe" -Force
+
+          Copy-Item "Melodyfy-Rust.exe" "dist/Melodyfy-Rust/Melodyfy-Rust.exe" -Force
+          Copy-Item "Melodyfy-Mobile.exe" "dist/Melodyfy-Rust/Melodyfy-Mobile.exe" -Force
+          if (Test-Path "iniciar_melodyfy_rust.bat") {
+            Copy-Item "iniciar_melodyfy_rust.bat" "dist/Melodyfy-Rust/" -Force
+          }
+          Copy-Item "README.md" "dist/Melodyfy-Rust/" -Force
+          if (Test-Path "assets") {
+            Copy-Item "assets" "dist/Melodyfy-Rust/assets" -Recurse -Force
+          }
+
+          # Download latest standalone yt-dlp.exe for fallback streaming
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "dist/Melodyfy-Rust/yt-dlp.exe"
+
+          Compress-Archive -Path "dist/Melodyfy-Rust/*" -DestinationPath "Melodyfy-Rust-Windows-x64.zip" -Force
+
+      - name: 🏷️ Determine Release Tag
+        id: tag_info
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/*") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $tag = "latest"
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: 🚀 Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_info.outputs.tag }}
+          name: "🎧 Melodyfy Rust — Release (${{ steps.tag_info.outputs.tag }})"
+          body: |
+            ## 🎧 Melodyfy Rust — Reproductor Nativo Libre, Rápido y Sin Anuncios (<25 MB RAM)
+            
+            ### ✨ Novedades incluidas en esta versión:
+            - 🎨 **Logo Oficial Melodyfy Rust** integrado en icono de ventana, barra de tareas, vistas de Escritorio, Mini-Player, Karaoke y Móvil 9:16.
+            - 🚀 **Motor Híbrido InnerTube en Rust Puro + `yt-dlp`**: Búsqueda instantánea (~200 ms) y caché de streams con pre-carga automática (0 ms).
+            - 📂 **Gestor Completo de Playlists Personalizadas**: Crea tus propias listas y añade canciones con un clic (`📂`).
+            - 💾 **Modo Descargas Offline (Sin DRM)**: Descarga canciones en `.m4a` y escúchalas sin internet.
+            - 🎤 **Modo Karaoke Sincronizado (LRCLIB)**: Letras en tiempo real con visualizador de espectro de 24 barras y ajuste de sincronización (`-0.5s` / `+0.5s`).
+            - ⚡ **Efectos de Velocidad DSP**: `1.0x Normal`, `1.25x Nightcore ⚡`, `1.5x Fast ⏩` y `0.85x Slowed Chill 🌙`.
+            - 📻 **Radio Infinita (Auto-Mix)** y **🌙 Temporizador de Sueño (Sleep Timer)**.
+            
+            ### 📥 Archivos de Descarga Directa:
+            - **`Melodyfy-Rust-Windows-x64.zip`**: Paquete portable completo (incluye versión Desktop, versión Mobile 9:16 y motor `yt-dlp.exe`).
+            - **`Melodyfy-Rust.exe`**: Ejecutable directo de Escritorio.
+            - **`Melodyfy-Mobile.exe`**: Ejecutable directo en formato Smartphone (9:16).
+          draft: false
+          prerelease: false
+          overwrite_files: true
+          files: |
+            Melodyfy-Rust-Windows-x64.zip
+            Melodyfy-Rust.exe
+            Melodyfy-Mobile.exe

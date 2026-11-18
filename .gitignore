@@ -9,7 +9,10 @@ melodyfy-rust/target/
 # --- Caché local y datos de usuario ---
 cache/
 melodyfy-rust/cache/
+downloads/
+melodyfy-rust/downloads/
 library.json
+*.zip
 
 # --- Ejecutables generados y binarios pesados ---
 Melodyfy.exe

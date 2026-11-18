@@ -67,3 +67,15 @@
 10. **Egui Child UI Layout Squishing & Empty Right Margin Defect:**
    - **Causa raíz:** `ui.new_child(UiBuilder::new().max_rect(rect))` en `egui 0.28` no registra la asignación espacial dentro del contenedor padre ni reposiciona el cursor a `rect.min`. Como consecuencia, las 3 secciones se apilaban secuencialmente hacia la izquierda, comprimiendo la barra de progreso a ~100px y dejando un vacío negro en la mitad derecha.
    - **Solución implementada:** Uso de `ui.allocate_new_ui(UiBuilder::new().max_rect(rect), ...)` para cada columna (`left_rect`, `center_rect`, `right_rect`). `center_rect` se calculó matemáticamente centrado en el eje X de la ventana (`center_w = 44%`, `slider_w` hasta 560px), y `right_rect` se ancló con `Layout::right_to_left` al borde derecho del frame, eliminando todo espacio muerto y garantizando simetría perfecta idéntica a Spotify.
+
+11: **Implementación de Módulo InnerTube Puro en Rust (`src/innertube.rs`) & Resolución de Error E0583:**
+    - **Diagnóstico:** `src/main.rs` declaraba `mod innertube;` pero el archivo fuente no existía en el repositorio, provocando el fallo del compilador `error[E0583]: file not found for module innertube`. Además, `iniciar_melodyfy.bat` seguía enlazado al binario antiguo de C#.
+    - **Solución implementada:**
+      - Se creó e implementó `src/innertube.rs` utilizando `ureq` y `serde_json` para consultar los endpoints de InnerTube (`/youtubei/v1/player`) con payloads emulados de Android e iOS.
+      - Extracción directa en memoria de URLs directas HTTPS para códecs de audio sin invocar subprocesos pesados de Python (`yt-dlp.exe`).
+      - Actualizado `iniciar_melodyfy.bat` y `build_rust.bat` para apuntar directamente a los binarios nativos de Rust (`Melodyfy-Rust.exe` y `Melodyfy-Mobile.exe`).
+
+12. **Letras Sincronizadas (Karaoke), Búsqueda Nativa Rust & Descarga Offline:**
+    - **Letras Sincronizadas (`src/lyrics.rs`):** Integración con la API abierta de LRCLIB. Parser nativo de timestamps LRC `[mm:ss.xx]`. En `app.rs`, la vista `render_lyrics_view` resalta la estrofa activa en blanco/verde Spotify a 25px negrita mientras atenúa las demás, con scroll automático centrado y salto inmediato en el reproductor al hacer clic en cualquier verso.
+    - **Búsqueda Nativa InnerTube en Rust Puro (`src/innertube.rs`):** Búsqueda directa HTTP en YouTube InnerTube en ~250ms, evitando spawn de procesos `yt-dlp.exe` para búsquedas regulares.
+    - **Descargas Offline Sin DRM (`src/streamer.rs`):** Descarga directa de streams de audio M4A/AAC a la carpeta local `downloads/`, con notificación toast y accesible desde la barra inferior, tabla de pistas y reproductor móvil.

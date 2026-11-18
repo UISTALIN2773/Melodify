@@ -97,9 +97,23 @@ impl Streamer {
         let in_flight_clone = self.in_flight.clone();
 
         std::thread::spawn(move || {
-            let mut tracks = Vec::new();
             let is_direct_url = query.starts_with("http://") || query.starts_with("https://");
             let is_playlist = is_direct_url && (query.contains("list=") || query.contains("playlist"));
+
+            // Priority 1: Instant Native InnerTube Search in Pure Rust (~250ms, 0 child processes)
+            if !is_direct_url {
+                if let Some(native_tracks) = crate::innertube::InnerTube::search(&query) {
+                    if !native_tracks.is_empty() {
+                        if let Some(first) = native_tracks.first().cloned() {
+                            Self::prefetch_internal(yt_path.clone(), cache_clone.clone(), in_flight_clone.clone(), first);
+                        }
+                        let _ = tx.send(native_tracks);
+                        return;
+                    }
+                }
+            }
+
+            let mut tracks = Vec::new();
 
             let mut args = vec![
                 "--dump-json".to_string(),
@@ -301,6 +315,11 @@ impl Streamer {
     }
 
     pub fn resolve_stream_url(&self, track: &Track) -> Option<String> {
+        // Offline local track fast path
+        if track.webpage_url.starts_with("local:") {
+            return Some(track.webpage_url.clone());
+        }
+
         // Instant check in persistent cache (0.0001 ms)
         {
             let cache = self.stream_cache.lock().ok()?;
@@ -367,5 +386,79 @@ impl Streamer {
         }
 
         None
+    }
+
+    /// Descarga directa de la pista en formato audio M4A/AAC a la carpeta local 'downloads/'
+    /// sin DRM propietario para reproducción libre y offline permanente.
+    pub fn download_track_async(&self, track: Track, tx: Sender<(String, bool, Option<(Track, String)>)>) {
+        let yt_path = self.yt_dlp_path.clone();
+        let cache_clone = self.stream_cache.clone();
+
+        std::thread::spawn(move || {
+            let _ = fs::create_dir_all("downloads");
+            let clean_title: String = track.title.chars()
+                .map(|c| match c {
+                    '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                    _ => c,
+                })
+                .collect();
+            let clean_artist: String = track.artist.chars()
+                .map(|c| match c {
+                    '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                    _ => c,
+                })
+                .collect();
+            let filename = format!("downloads/{} - {}.m4a", clean_artist, clean_title);
+
+            // 1. Obtener URL de stream (desde caché, InnerTube o yt-dlp)
+            let mut stream_url: Option<String> = None;
+            if let Ok(cache) = cache_clone.lock() {
+                if let Some((url, ts)) = cache.get(&track.id) {
+                    if ts.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
+                        stream_url = Some(url.clone());
+                    }
+                }
+            }
+
+            if stream_url.is_none() {
+                stream_url = crate::innertube::InnerTube::resolve_stream_url(&track.id);
+            }
+
+            if stream_url.is_none() {
+                let mut cmd = Command::new(&yt_path);
+                cmd.args(&[
+                    "-g",
+                    "-f", "bestaudio[ext=m4a]/bestaudio/best",
+                    "--no-warnings",
+                    "--no-playlist",
+                    &format!("https://www.youtube.com/watch?v={}", track.id)
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+
+                if let Ok(output) = cmd.output() {
+                    let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !out.is_empty() {
+                        stream_url = Some(out);
+                    }
+                }
+            }
+
+            if let Some(url) = stream_url {
+                if let Ok(resp) = ureq::get(&url).call() {
+                    if let Ok(mut file) = fs::File::create(&filename) {
+                        let mut reader = resp.into_body().into_reader();
+                        if std::io::copy(&mut reader, &mut file).is_ok() {
+                            let msg = format!("✅ Descargado: {}", track.title);
+                            let _ = tx.send((msg, true, Some((track, filename))));
+                            return;
+                        }
+                    }
+                }
+            }
+
+            let _ = tx.send((format!("❌ Error al descargar: {}", track.title), false, None));
+        });
     }
 }

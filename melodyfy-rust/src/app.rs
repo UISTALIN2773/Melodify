@@ -11,8 +11,11 @@ pub enum ViewTab {
     Home,
     Search,
     Favorites,
+    Playlists,
+    Downloads,
     History,
     Queue,
+    Lyrics,
 }
 
 pub struct MelodyfyApp {
@@ -37,6 +40,20 @@ pub struct MelodyfyApp {
     last_known_state: i32,
     last_seek_time: Instant,
     volume: i32,
+    playback_rate: f64,
+
+    // Infinite Radio / Auto-Mix
+    is_auto_radio: bool,
+    is_loading_radio: bool,
+    radio_rx: Option<Receiver<Vec<Track>>>,
+
+    // Sleep Timer
+    sleep_timer_minutes: u32, // 0 = Off, 15, 30, 45, 60
+    sleep_timer_end: Option<Instant>,
+
+    // Custom Playlists UI
+    selected_playlist: Option<String>,
+    new_playlist_name: String,
 
     // Notification toast
     toast_message: Option<(String, Instant)>,
@@ -60,14 +77,25 @@ pub struct MelodyfyApp {
 
     // Category filter for the Home Popular Grid
     pub popular_category_filter: usize,
+
+    // Lyrics & Karaoke (LRCLIB)
+    lyrics_data: Option<crate::lyrics::LyricsData>,
+    is_loading_lyrics: bool,
+    lyrics_rx: Option<Receiver<(String, Option<crate::lyrics::LyricsData>)>>,
+    lyrics_offset_secs: f64,
+
+    // Offline Downloads (Sin DRM)
+    download_rx: Option<Receiver<(String, bool, Option<(Track, String)>)>>,
 }
 
 impl MelodyfyApp {
     pub fn new(_cc: &eframe::CreationContext<'_>, start_in_mobile: bool) -> Self {
         let audio = Arc::new(AudioEngine::new());
         let streamer = Arc::new(Streamer::new());
-        let library = AppLibrary::load();
+        let mut library = AppLibrary::load();
+        library.scan_local_downloads();
         let volume = library.last_volume.unwrap_or(100);
+        let is_auto_radio = library.auto_radio.unwrap_or(true);
         audio.set_volume(volume);
 
         let mut app = Self {
@@ -88,6 +116,14 @@ impl MelodyfyApp {
             last_known_state: 1,
             last_seek_time: Instant::now(),
             volume,
+            playback_rate: 1.0,
+            is_auto_radio,
+            is_loading_radio: false,
+            radio_rx: None,
+            sleep_timer_minutes: 0,
+            sleep_timer_end: None,
+            selected_playlist: None,
+            new_playlist_name: String::new(),
             toast_message: None,
             is_mini_mode: false,
             use_spotify_green: true,
@@ -99,6 +135,11 @@ impl MelodyfyApp {
             show_mobile_fullscreen_player: false,
             mobile_library_subtab: 0,
             popular_category_filter: 0,
+            lyrics_data: None,
+            is_loading_lyrics: false,
+            lyrics_rx: None,
+            lyrics_offset_secs: 0.0,
+            download_rx: None,
         };
 
         // Default initial home query: Anime Openings & J-Pop
@@ -170,14 +211,101 @@ impl MelodyfyApp {
                 self.streamer.prefetch_stream_url(&self.queue[next_idx]);
             }
         }
+
+        self.fetch_lyrics_for_current();
+    }
+
+    pub fn fetch_lyrics_for_current(&mut self) {
+        if let Some(track) = self.current_track().cloned() {
+            if let Some(ref existing) = self.lyrics_data {
+                if existing.track_id == track.id {
+                    return;
+                }
+            }
+            self.lyrics_data = None;
+            self.is_loading_lyrics = true;
+            let (tx, rx) = channel();
+            self.lyrics_rx = Some(rx);
+            let id = track.id.clone();
+            let title = track.title.clone();
+            let artist = track.artist.clone();
+            let dur = track.duration_seconds;
+            std::thread::spawn(move || {
+                let data = crate::lyrics::LyricsFetcher::fetch_lyrics(&title, &artist, dur, &id);
+                let _ = tx.send((id, data));
+            });
+        }
+    }
+
+    pub fn start_download(&mut self, track: Track) {
+        self.show_toast(format!("💾 Descargando: {}...", track.title));
+        let (tx, rx) = channel();
+        self.download_rx = Some(rx);
+        self.streamer.download_track_async(track, tx);
     }
 
     pub fn current_track(&self) -> Option<&Track> {
         self.current_index.and_then(|i| self.queue.get(i))
     }
 
+    pub fn cycle_playback_rate(&mut self) {
+        self.playback_rate = if (self.playback_rate - 1.0).abs() < 0.05 {
+            1.25 // Nightcore / Speed Up
+        } else if (self.playback_rate - 1.25).abs() < 0.05 {
+            1.5 // Fast
+        } else if (self.playback_rate - 1.5).abs() < 0.05 {
+            0.85 // Slowed / Chill
+        } else {
+            1.0 // Normal
+        };
+        self.audio.set_playback_rate(self.playback_rate);
+        let mode_label = match () {
+            _ if (self.playback_rate - 1.25).abs() < 0.05 => "⚡ Modo Nightcore (1.25x)",
+            _ if (self.playback_rate - 1.5).abs() < 0.05 => "⏩ Velocidad Rápida (1.5x)",
+            _ if (self.playback_rate - 0.85).abs() < 0.05 => "🌙 Modo Slowed Chill (0.85x)",
+            _ => "🎵 Velocidad Normal (1.0x)",
+        };
+        self.show_toast(mode_label);
+    }
+
+    pub fn cycle_sleep_timer(&mut self) {
+        self.sleep_timer_minutes = match self.sleep_timer_minutes {
+            0 => 15,
+            15 => 30,
+            30 => 45,
+            45 => 60,
+            _ => 0,
+        };
+        if self.sleep_timer_minutes > 0 {
+            self.sleep_timer_end = Some(Instant::now() + std::time::Duration::from_secs(self.sleep_timer_minutes as u64 * 60));
+            self.show_toast(format!("🌙 Temporizador activado: {} min", self.sleep_timer_minutes));
+        } else {
+            self.sleep_timer_end = None;
+            self.show_toast("🌙 Temporizador desactivado");
+        }
+    }
+
+    pub fn trigger_auto_radio(&mut self) {
+        if self.is_loading_radio {
+            return;
+        }
+        let seed_query = if let Some(curr) = self.current_track() {
+            format!("{} {} Mix", curr.artist, curr.title)
+        } else {
+            "Anime Openings J-Pop Hits".to_string()
+        };
+        self.is_loading_radio = true;
+        self.show_toast("📻 Radio Infinita: Buscando pistas similares...");
+        let (tx, rx) = channel();
+        self.radio_rx = Some(rx);
+        self.streamer.search_async(seed_query, tx);
+    }
+
     pub fn play_next(&mut self) {
         if self.queue.is_empty() {
+            if self.is_auto_radio {
+                self.trigger_auto_radio();
+            }
             return;
         }
 
@@ -193,6 +321,9 @@ impl MelodyfyApp {
             Some(i) => {
                 if i + 1 < self.queue.len() {
                     Some(i + 1)
+                } else if self.is_auto_radio {
+                    self.trigger_auto_radio();
+                    None
                 } else if self.repeat_mode == RepeatMode::All {
                     Some(0)
                 } else {
@@ -302,6 +433,73 @@ impl eframe::App for MelodyfyApp {
             }
         }
 
+        if let Some(ref rx) = self.lyrics_rx {
+            if let Ok((track_id, maybe_data)) = rx.try_recv() {
+                if let Some(curr) = self.current_track() {
+                    if curr.id == track_id {
+                        self.lyrics_data = maybe_data;
+                        self.is_loading_lyrics = false;
+                    }
+                }
+            }
+        }
+
+        let mut download_msgs = Vec::new();
+        let mut new_downloads = Vec::new();
+        if let Some(ref rx) = self.download_rx {
+            while let Ok((msg, _success, downloaded_info)) = rx.try_recv() {
+                download_msgs.push(msg);
+                if let Some(info) = downloaded_info {
+                    new_downloads.push(info);
+                }
+            }
+        }
+        for (track, local_path) in new_downloads {
+            self.library.record_download(track, local_path);
+        }
+        for msg in download_msgs {
+            self.show_toast(msg);
+        }
+
+        // Check Infinite Radio Auto-Mix receiver
+        let mut incoming_radio: Option<Vec<Track>> = None;
+        if let Some(ref rx) = self.radio_rx {
+            while let Ok(tracks) = rx.try_recv() {
+                incoming_radio = Some(tracks);
+            }
+        }
+        if let Some(radio_tracks) = incoming_radio {
+            let prev_len = self.queue.len();
+            let mut added_count = 0;
+            for t in radio_tracks {
+                if !self.queue.iter().any(|existing| existing.id == t.id) {
+                    self.queue.push(t);
+                    added_count += 1;
+                    if added_count >= 10 {
+                        break;
+                    }
+                }
+            }
+            if added_count > 0 {
+                self.is_loading_radio = false;
+                self.radio_rx = None;
+                self.show_toast(format!("📻 Radio Infinita: +{} canciones añadidas", added_count));
+                if prev_len == 0 || self.current_index == Some(prev_len.saturating_sub(1)) {
+                    self.play_queue_index(prev_len);
+                }
+            }
+        }
+
+        // Check Sleep Timer countdown
+        if let Some(end_time) = self.sleep_timer_end {
+            if Instant::now() >= end_time {
+                self.audio.pause();
+                self.sleep_timer_end = None;
+                self.sleep_timer_minutes = 0;
+                self.show_toast("🌙 Temporizador finalizado: Música en pausa");
+            }
+        }
+
         self.check_auto_advance();
         self.handle_shortcuts(ctx);
 
@@ -381,10 +579,15 @@ impl MelodyfyApp {
     fn render_sidebar(&mut self, ui: &mut egui::Ui, accent: Color32) {
         ui.add_space(16.0);
 
-        // App Branding
+        // App Branding with Official Melodyfy Rust Logo
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label(egui::RichText::new("🟢").size(22.0).color(accent));
+            ui.add_space(14.0);
+            ui.add(
+                egui::Image::new(crate::APP_LOGO_URI)
+                    .fit_to_exact_size(Vec2::new(42.0, 42.0))
+                    .rounding(Rounding::same(8.0)),
+            );
+            ui.add_space(8.0);
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("Melodyfy").strong().size(20.0).color(Color32::WHITE));
                 ui.label(egui::RichText::new("SPOTIFY KILLER • RUST").size(9.0).color(accent).strong());
@@ -398,8 +601,11 @@ impl MelodyfyApp {
             (ViewTab::Home, "🏠", "Inicio"),
             (ViewTab::Search, "🔍", "Buscar"),
             (ViewTab::Favorites, "💚", "Tus Me Gusta"),
+            (ViewTab::Playlists, "📂", "Mis Playlists"),
+            (ViewTab::Downloads, "💾", "Descargas Offline"),
             (ViewTab::History, "🕒", "Historial"),
             (ViewTab::Queue, "📑", "Cola Actual"),
+            (ViewTab::Lyrics, "🎤", "Letras Karaoke"),
         ];
 
         for (tab, icon, label) in tabs {
@@ -408,19 +614,24 @@ impl MelodyfyApp {
             let text_color = if is_active { Color32::WHITE } else { Color32::from_rgb(179, 179, 179) };
 
             let content = egui::RichText::new(format!("  {}   {}", icon, label))
-                .size(14.0)
+                .size(13.5)
                 .strong()
                 .color(text_color);
 
             let btn = egui::Button::new(content)
                 .fill(bg)
                 .rounding(Rounding::same(8.0))
-                .min_size(Vec2::new(200.0, 40.0));
+                .min_size(Vec2::new(200.0, 34.0));
 
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 if ui.add(btn).clicked() {
                     self.current_tab = tab;
+                    if tab == ViewTab::Lyrics {
+                        self.fetch_lyrics_for_current();
+                    } else if tab == ViewTab::Downloads {
+                        self.library.scan_local_downloads();
+                    }
                 }
             });
         }
@@ -480,6 +691,12 @@ impl MelodyfyApp {
 
             ui.add_space(6.0);
             ui.label(egui::RichText::new("🚀 0% Publicidad • 100% Libre").size(10.0).color(Color32::from_rgb(110, 110, 110)));
+            ui.add_space(6.0);
+            ui.add(
+                egui::Image::new(crate::APP_LOGO_URI)
+                    .fit_to_exact_size(Vec2::new(48.0, 48.0))
+                    .rounding(Rounding::same(10.0)),
+            );
         });
     }
 
@@ -610,8 +827,11 @@ impl MelodyfyApp {
             ViewTab::Home => self.render_home_view(ui, accent),
             ViewTab::Search => self.render_search_view(ui, accent),
             ViewTab::Favorites => self.render_favorites_view(ui, accent),
+            ViewTab::Playlists => self.render_playlists_view(ui, accent),
+            ViewTab::Downloads => self.render_downloads_view(ui, accent),
             ViewTab::History => self.render_history_view(ui, accent),
             ViewTab::Queue => self.render_queue_view(ui, accent),
+            ViewTab::Lyrics => self.render_lyrics_view(ui, accent),
         }
     }
 
@@ -620,7 +840,16 @@ impl MelodyfyApp {
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.add_space(16.0);
-                ui.heading(egui::RichText::new("Buenas tardes").size(28.0).strong().color(Color32::WHITE));
+                ui.add(
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(44.0, 44.0))
+                        .rounding(Rounding::same(8.0)),
+                );
+                ui.add_space(10.0);
+                ui.vertical(|ui| {
+                    ui.heading(egui::RichText::new("Buenas tardes").size(26.0).strong().color(Color32::WHITE));
+                    ui.label(egui::RichText::new("Melodyfy Rust Engine • Audio Nativo Sin Anuncios").size(11.5).color(accent));
+                });
             });
 
             ui.add_space(16.0);
@@ -1048,6 +1277,14 @@ impl MelodyfyApp {
                 ui.add_space(16.0);
                 ui.heading(egui::RichText::new("💚 Tus Canciones Favoritas").size(22.0).strong().color(Color32::WHITE));
                 ui.label(egui::RichText::new(format!("({} canciones guardadas)", self.library.favorites.len())).color(Color32::GRAY));
+                if !self.library.favorites.is_empty() {
+                    ui.add_space(12.0);
+                    if ui.add(egui::Button::new(egui::RichText::new("▶ Reproducir Todo").strong().color(Color32::BLACK)).fill(accent)).clicked() {
+                        self.queue = self.library.favorites.clone();
+                        self.play_queue_index(0);
+                        self.show_toast("▶ Reproduciendo Tus Me Gusta");
+                    }
+                }
             });
 
             ui.add_space(10.0);
@@ -1060,6 +1297,165 @@ impl MelodyfyApp {
                 });
             } else {
                 self.render_track_table(ui, &self.library.favorites.clone(), accent);
+            }
+        });
+    }
+
+    fn render_playlists_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(12.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.heading(egui::RichText::new("📂 Mis Playlists Personalizadas").size(22.0).strong().color(Color32::WHITE));
+                ui.add_space(16.0);
+
+                ui.add_sized(
+                    [200.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_playlist_name)
+                        .hint_text("➕ Nombre de nueva playlist..."),
+                );
+
+                if ui.add(egui::Button::new(egui::RichText::new("Crear Playlist").strong().color(Color32::BLACK)).fill(accent)).clicked() {
+                    let name = self.new_playlist_name.trim().to_string();
+                    if !name.is_empty() {
+                        if self.library.create_playlist(name.clone()) {
+                            self.selected_playlist = Some(name.clone());
+                            self.new_playlist_name.clear();
+                            self.show_toast(format!("📂 Playlist '{}' creada", name));
+                        } else {
+                            self.show_toast("Esa playlist ya existe");
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(12.0);
+
+            let mut playlist_names: Vec<String> = self.library.playlists.keys().cloned().collect();
+            playlist_names.sort();
+
+            if playlist_names.is_empty() {
+                ui.add_space(40.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("Aún no has creado ninguna playlist personalizada.").size(16.0).color(Color32::GRAY));
+                    ui.label(egui::RichText::new("Escribe un nombre arriba o pulsa el botón 📂 en cualquier canción para guardarla.").color(Color32::DARK_GRAY));
+                });
+                return;
+            }
+
+            if self.selected_playlist.is_none() || !playlist_names.contains(self.selected_playlist.as_ref().unwrap()) {
+                self.selected_playlist = playlist_names.first().cloned();
+            }
+
+            // Playlist selector chips
+            let mut to_delete: Option<String> = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(16.0);
+                for name in &playlist_names {
+                    let count = self.library.playlists.get(name).map(|v| v.len()).unwrap_or(0);
+                    let is_sel = self.selected_playlist.as_deref() == Some(name.as_str());
+                    let bg = if is_sel { accent } else { Color32::from_rgb(36, 36, 36) };
+                    let fg = if is_sel { Color32::BLACK } else { Color32::WHITE };
+
+                    let btn = egui::Button::new(egui::RichText::new(format!("📂 {} ({})", name, count)).strong().size(13.0).color(fg))
+                        .fill(bg)
+                        .rounding(Rounding::same(14.0));
+                    if ui.add(btn).clicked() {
+                        self.selected_playlist = Some(name.clone());
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            if let Some(sel_name) = self.selected_playlist.clone() {
+                let tracks = self.library.playlists.get(&sel_name).cloned().unwrap_or_default();
+                ui.horizontal(|ui| {
+                    ui.add_space(16.0);
+                    ui.label(egui::RichText::new(format!("📂 {}", sel_name)).size(18.0).strong().color(Color32::WHITE));
+                    ui.label(egui::RichText::new(format!("({} pistas)", tracks.len())).color(Color32::GRAY));
+
+                    if !tracks.is_empty() {
+                        ui.add_space(10.0);
+                        if ui.add(egui::Button::new(egui::RichText::new("▶ Reproducir Playlist").strong().color(Color32::BLACK)).fill(accent)).clicked() {
+                            self.queue = tracks.clone();
+                            self.play_queue_index(0);
+                            self.show_toast(format!("▶ Reproduciendo '{}'", sel_name));
+                        }
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(20.0);
+                        if ui.button(egui::RichText::new("🗑 Eliminar Playlist").color(Color32::from_rgb(239, 68, 68))).clicked() {
+                            to_delete = Some(sel_name.clone());
+                        }
+                    });
+                });
+
+                ui.add_space(8.0);
+                if tracks.is_empty() {
+                    ui.add_space(30.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("Esta playlist está vacía. Usa el botón 📂 en cualquier canción para añadirla.").color(Color32::GRAY));
+                    });
+                } else {
+                    self.render_track_table(ui, &tracks, accent);
+                }
+            }
+
+            if let Some(del_name) = to_delete {
+                self.library.delete_playlist(&del_name);
+                self.selected_playlist = None;
+                self.show_toast(format!("🗑 Playlist '{}' eliminada", del_name));
+            }
+        });
+    }
+
+    fn render_downloads_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.heading(egui::RichText::new("💾 Descargas Offline (Sin DRM)").size(22.0).strong().color(Color32::WHITE));
+                ui.label(egui::RichText::new(format!("({} archivos locales)", self.library.downloads.len())).color(Color32::GRAY));
+
+                if !self.library.downloads.is_empty() {
+                    ui.add_space(10.0);
+                    if ui.add(egui::Button::new(egui::RichText::new("▶ Reproducir Offline").strong().color(Color32::BLACK)).fill(accent)).clicked() {
+                        self.queue = self.library.downloads.clone();
+                        self.play_queue_index(0);
+                        self.show_toast("💾 Reproduciendo biblioteca offline");
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(20.0);
+                    if ui.button("📁 Abrir Carpeta").on_hover_text("Abrir carpeta 'downloads' en el Explorador de Windows").clicked() {
+                        let _ = std::fs::create_dir_all("downloads");
+                        let _ = std::process::Command::new("explorer").arg("downloads").spawn();
+                    }
+                    ui.add_space(6.0);
+                    if ui.button("🔄 Escanear").on_hover_text("Buscar archivos .m4a / .mp3 en la carpeta downloads").clicked() {
+                        self.library.scan_local_downloads();
+                        self.show_toast("💾 Carpeta de descargas actualizada");
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+
+            if self.library.downloads.is_empty() {
+                ui.add_space(50.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("No hay canciones descargadas todavía.").size(16.0).color(Color32::GRAY));
+                    ui.label(egui::RichText::new("Haz clic en el icono ⬇ en cualquier canción para guardarla en formato M4A/AAC sin DRM.").color(Color32::DARK_GRAY));
+                });
+            } else {
+                self.render_track_table(ui, &self.library.downloads.clone(), accent);
             }
         });
     }
@@ -1109,6 +1505,176 @@ impl MelodyfyApp {
                 self.render_track_table(ui, &self.queue.clone(), accent);
             }
         });
+    }
+
+    fn render_lyrics_view(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        let curr_track = self.current_track().cloned();
+        let status = self.audio.get_status();
+
+        ui.add_space(12.0);
+
+        // Header: Song info & Sync status
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            if let Some(ref t) = curr_track {
+                ui.vertical(|ui| {
+                    ui.heading(egui::RichText::new(&t.title).size(22.0).strong().color(Color32::WHITE));
+                    ui.label(egui::RichText::new(&t.artist).size(13.0).color(Color32::from_rgb(180, 180, 180)));
+                });
+            } else {
+                ui.heading(egui::RichText::new("🎤 Letras en Tiempo Real").size(22.0).strong().color(Color32::WHITE));
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(20.0);
+                if ui.button("🔄 Recargar Letra").on_hover_text("Volver a consultar LRCLIB").clicked() {
+                    self.lyrics_data = None;
+                    self.fetch_lyrics_for_current();
+                }
+
+                ui.add_space(8.0);
+                if ui.small_button("⏩ +0.5s").on_hover_text("Adelantar sincronización de letra").clicked() {
+                    self.lyrics_offset_secs += 0.5;
+                }
+                if ui.small_button(format!("{:+.1}s", self.lyrics_offset_secs)).on_hover_text("Reiniciar offset a 0.0s").clicked() {
+                    self.lyrics_offset_secs = 0.0;
+                }
+                if ui.small_button("⏪ -0.5s").on_hover_text("Retrasar sincronización de letra").clicked() {
+                    self.lyrics_offset_secs -= 0.5;
+                }
+            });
+        });
+
+        // Live 24-Bar Audio Spectrum Visualizer on Karaoke stage when playing
+        if status.state == 3 {
+            ui.add_space(6.0);
+            ui.vertical_centered(|ui| {
+                let time = ui.ctx().input(|i| i.time);
+                let num_bars = 24;
+                let bar_w = 6.0_f32;
+                let gap = 3.0_f32;
+                let total_w = num_bars as f32 * (bar_w + gap);
+                let (vis_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 22.0), egui::Sense::hover());
+                for b in 0..num_bars {
+                    let freq = 4.5 + (b % 7) as f64 * 1.7;
+                    let phase = b as f64 * 0.45;
+                    let h = (4.0 + 17.0 * ((time * freq + phase).sin().abs() as f32)).min(22.0);
+                    let x = vis_rect.min.x + b as f32 * (bar_w + gap);
+                    let y = vis_rect.max.y - h;
+                    let r = egui::Rect::from_min_size(egui::pos2(x, y), Vec2::new(bar_w, h));
+                    ui.painter().rect_filled(r, Rounding::same(2.0), accent);
+                }
+            });
+        }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(10.0);
+
+        if curr_track.is_none() {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(110.0, 110.0))
+                        .rounding(Rounding::same(16.0)),
+                );
+                ui.add_space(14.0);
+                ui.label(egui::RichText::new("🎧 Elige una canción para ver su letra en modo Karaoke").size(16.0).color(Color32::GRAY));
+            });
+            return;
+        }
+
+        if self.is_loading_lyrics {
+            ui.add_space(60.0);
+            ui.vertical_centered(|ui| {
+                ui.spinner();
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("Buscando letra sincronizada en LRCLIB...").size(15.0).color(accent));
+            });
+            return;
+        }
+
+        if let Some(ref lyrics) = self.lyrics_data {
+            if lyrics.lines.is_empty() {
+                ui.add_space(60.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("No hay letra disponible para esta canción.").size(15.0).color(Color32::GRAY));
+                });
+                return;
+            }
+
+            let cur_pos = (status.position + self.lyrics_offset_secs).max(0.0);
+            let mut active_idx = None;
+            if lyrics.is_synced {
+                for (i, line) in lyrics.lines.iter().enumerate() {
+                    if line.time_seconds <= cur_pos {
+                        active_idx = Some(i);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            let mut seek_target = None;
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(20.0);
+
+                        for (i, line) in lyrics.lines.iter().enumerate() {
+                            let is_active = active_idx == Some(i);
+                            let text_color = if is_active {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_rgb(115, 115, 115)
+                            };
+
+                            let font_size = if is_active { 25.0 } else { 18.0 };
+                            let mut rich = egui::RichText::new(&line.text)
+                                .size(font_size)
+                                .color(text_color);
+
+                            if is_active {
+                                rich = rich.strong();
+                            }
+
+                            let resp = ui.add(
+                                egui::Button::new(rich)
+                                    .frame(false)
+                                    .min_size(Vec2::new(ui.available_width() - 40.0, font_size + 14.0))
+                            );
+
+                            if is_active && lyrics.is_synced {
+                                resp.scroll_to_me(Some(egui::Align::Center));
+                            }
+
+                            if resp.clicked() && lyrics.is_synced {
+                                seek_target = Some(line.time_seconds);
+                            }
+
+                            ui.add_space(6.0);
+                        }
+
+                        ui.add_space(80.0);
+                    });
+                });
+
+            if let Some(seek_time) = seek_target {
+                self.audio.seek(seek_time);
+            }
+        } else {
+            ui.add_space(60.0);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("No encontramos letra sincronizada para esta pista.").size(15.0).color(Color32::GRAY));
+                ui.add_space(10.0);
+                if ui.button("Intentar buscar de nuevo").clicked() {
+                    self.fetch_lyrics_for_current();
+                }
+            });
+        }
     }
 
     fn render_track_table(&mut self, ui: &mut egui::Ui, tracks: &[Track], accent: Color32) {
@@ -1164,7 +1730,7 @@ impl MelodyfyApp {
                 self.streamer.prefetch_stream_url(track);
             }
 
-            let clicked_actions = response.hover_pos().map_or(false, |p| p.x > rect.max.x - 120.0);
+            let clicked_actions = response.hover_pos().map_or(false, |p| p.x > rect.max.x - 165.0);
             if (response.clicked() && !clicked_actions) || response.double_clicked() {
                 self.play_track_now(track.clone());
             }
@@ -1193,10 +1759,15 @@ impl MelodyfyApp {
 
                 ui.add_space(8.0);
 
-                // ALBUM COVER IMAGE THUMBNAIL (Fixed 44x44 container to prevent visual jumping)
+                // ALBUM COVER IMAGE THUMBNAIL (Fixed 44x44 container with Melodyfy Rust Logo default)
                 let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(44.0, 44.0), egui::Sense::hover());
                 ui.painter().rect_filled(thumb_rect, Rounding::same(4.0), Color32::from_rgb(34, 34, 34));
-                ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(18.0), Color32::from_rgb(90, 90, 90));
+                ui.put(
+                    thumb_rect,
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(44.0, 44.0))
+                        .rounding(Rounding::same(4.0)),
+                );
 
                 if !track.thumbnail_url.is_empty() {
                     ui.put(
@@ -1236,7 +1807,43 @@ impl MelodyfyApp {
                         self.show_toast("¡Añadido a la cola!");
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
+
+                    // Add to Custom Playlist Menu / Remove if inside Playlists tab
+                    let mut playlist_names: Vec<String> = self.library.playlists.keys().cloned().collect();
+                    playlist_names.sort();
+                    ui.menu_button("📂", |ui| {
+                        ui.label(egui::RichText::new("Añadir a Playlist:").strong().size(11.5).color(accent));
+                        ui.separator();
+                        if playlist_names.is_empty() {
+                            if ui.button("➕ Crear 'Mi Mix' y añadir").clicked() {
+                                self.library.create_playlist("Mi Mix".to_string());
+                                self.library.add_to_playlist("Mi Mix", track.clone());
+                                self.show_toast("📂 Guardada en 'Mi Mix'");
+                                ui.close_menu();
+                            }
+                        } else {
+                            for pl_name in &playlist_names {
+                                if ui.button(format!("📂 {}", pl_name)).clicked() {
+                                    self.library.add_to_playlist(pl_name, track.clone());
+                                    self.show_toast(format!("📂 Añadida a '{}'", pl_name));
+                                    ui.close_menu();
+                                }
+                            }
+                        }
+                        if self.current_tab == ViewTab::Playlists {
+                            if let Some(sel) = self.selected_playlist.clone() {
+                                ui.separator();
+                                if ui.button(egui::RichText::new("🗑 Quitar de esta playlist").color(Color32::from_rgb(239, 68, 68))).clicked() {
+                                    self.library.remove_from_playlist(&sel, &track.id);
+                                    self.show_toast("Quitada de la playlist");
+                                    ui.close_menu();
+                                }
+                            }
+                        }
+                    });
+
+                    ui.add_space(6.0);
 
                     // Favorite button
                     let is_fav = self.library.is_favorite(&track.id);
@@ -1246,6 +1853,13 @@ impl MelodyfyApp {
                         if added {
                             self.show_toast("Guardada en Tus Me Gusta");
                         }
+                    }
+
+                    ui.add_space(6.0);
+
+                    // Offline Download button (Sin DRM)
+                    if ui.small_button("⬇").on_hover_text("Descargar audio M4A/AAC (Sin DRM)").clicked() {
+                        self.start_download(track.clone());
                     }
                 });
             });
@@ -1291,6 +1905,12 @@ impl MelodyfyApp {
                 ui.painter().rect_filled(art_rect, Rounding::same(6.0), Color32::from_rgb(32, 32, 32));
 
                 if let Some(ref t) = curr_track {
+                    ui.put(
+                        art_rect,
+                        egui::Image::new(crate::APP_LOGO_URI)
+                            .fit_to_exact_size(Vec2::new(56.0, 56.0))
+                            .rounding(Rounding::same(6.0)),
+                    );
                     if !t.thumbnail_url.is_empty() {
                         ui.put(
                             art_rect,
@@ -1298,8 +1918,6 @@ impl MelodyfyApp {
                                 .fit_to_exact_size(Vec2::new(56.0, 56.0))
                                 .rounding(Rounding::same(6.0)),
                         );
-                    } else {
-                        ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(26.0), Color32::WHITE);
                     }
 
                     ui.add_space(10.0);
@@ -1349,11 +1967,23 @@ impl MelodyfyApp {
                     if ui.add(egui::Button::new(egui::RichText::new(heart).size(15.0)).frame(false)).on_hover_text("Me gusta").clicked() {
                         self.library.toggle_favorite(t.clone());
                     }
+
+                    ui.add_space(6.0);
+                    if ui.add(egui::Button::new(egui::RichText::new("⬇").size(14.0).color(Color32::from_rgb(180, 180, 180))).frame(false))
+                        .on_hover_text("Descargar canción (Sin DRM)").clicked()
+                    {
+                        self.start_download(t.clone());
+                    }
                 } else {
-                    ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎧", FontId::proportional(26.0), Color32::GRAY);
+                    ui.put(
+                        art_rect,
+                        egui::Image::new(crate::APP_LOGO_URI)
+                            .fit_to_exact_size(Vec2::new(56.0, 56.0))
+                            .rounding(Rounding::same(6.0)),
+                    );
                     ui.add_space(10.0);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Melodyfy").strong().size(14.0).color(Color32::WHITE));
+                        ui.label(egui::RichText::new("Melodyfy Rust").strong().size(14.0).color(Color32::WHITE));
                         ui.label(egui::RichText::new("Elige una pista para comenzar").size(11.0).color(Color32::GRAY));
                     });
                 }
@@ -1467,11 +2097,11 @@ impl MelodyfyApp {
         // ================= 3. RIGHT SECTION (Volume Slider & Tools Docked to Window Right Edge) =================
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_rect), |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(20.0);
+                ui.add_space(14.0);
 
                 // Mini-Player / Background Mode HUD (440x120 floating)
                 let mini_icon = if self.is_mini_mode { "🪟" } else { "🕹️" };
-                if ui.add(egui::Button::new(egui::RichText::new(mini_icon).size(15.0)).frame(false))
+                if ui.add(egui::Button::new(egui::RichText::new(mini_icon).size(14.5)).frame(false))
                     .on_hover_text("Modo Mini / 2º Plano Flotante (440x120)").clicked()
                 {
                     self.is_mini_mode = !self.is_mini_mode;
@@ -1488,27 +2118,85 @@ impl MelodyfyApp {
                     }));
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(4.0);
+
+                // Sleep Timer button
+                let timer_active = self.sleep_timer_minutes > 0;
+                let timer_color = if timer_active { accent } else { Color32::from_rgb(170, 170, 170) };
+                let timer_label = if let Some(end) = self.sleep_timer_end {
+                    let rem_mins = (end.saturating_duration_since(Instant::now()).as_secs() / 60) + 1;
+                    format!("🌙{}m", rem_mins)
+                } else {
+                    "🌙".to_string()
+                };
+                if ui.add(egui::Button::new(egui::RichText::new(timer_label).size(12.5).color(timer_color)).frame(false))
+                    .on_hover_text("Temporizador de Sueño (Off / 15m / 30m / 45m / 60m)").clicked()
+                {
+                    self.cycle_sleep_timer();
+                }
+
+                ui.add_space(4.0);
+
+                // Infinite Radio Auto-Mix toggle
+                let radio_color = if self.is_auto_radio { accent } else { Color32::from_rgb(150, 150, 150) };
+                if ui.add(egui::Button::new(egui::RichText::new("📻").size(14.5).color(radio_color)).frame(false))
+                    .on_hover_text("Radio Infinita Auto-Mix (Añade música similar automáticamente al terminar la cola)").clicked()
+                {
+                    self.is_auto_radio = !self.is_auto_radio;
+                    self.library.auto_radio = Some(self.is_auto_radio);
+                    self.library.save();
+                    let msg = if self.is_auto_radio { "📻 Radio Infinita ACTIVADA" } else { "📻 Radio Infinita DESACTIVADA" };
+                    self.show_toast(msg);
+                }
+
+                ui.add_space(4.0);
+
+                // Speed / Nightcore / Slowed Effect preset button
+                let is_custom_speed = (self.playback_rate - 1.0).abs() > 0.05;
+                let speed_color = if is_custom_speed { accent } else { Color32::from_rgb(170, 170, 170) };
+                let speed_label = format!("{:.2}x", self.playback_rate).replace(".00x", ".0x").replace("1.50x", "1.5x");
+                if ui.add(egui::Button::new(egui::RichText::new(speed_label).size(11.5).strong().color(speed_color)).frame(false))
+                    .on_hover_text("Efecto de Velocidad DSP: 1.0x Normal / 1.25x Nightcore / 1.5x Fast / 0.85x Slowed").clicked()
+                {
+                    self.cycle_playback_rate();
+                }
+
+                ui.add_space(4.0);
+
+                // Lyrics button (Spotify Style)
+                let lyrics_color = if self.current_tab == ViewTab::Lyrics { accent } else { Color32::from_rgb(170, 170, 170) };
+                if ui.add(egui::Button::new(egui::RichText::new("🎤").size(14.5).color(lyrics_color)).frame(false))
+                    .on_hover_text("Letras sincronizadas (Karaoke)").clicked()
+                {
+                    if self.current_tab == ViewTab::Lyrics {
+                        self.current_tab = ViewTab::Home;
+                    } else {
+                        self.current_tab = ViewTab::Lyrics;
+                        self.fetch_lyrics_for_current();
+                    }
+                }
+
+                ui.add_space(4.0);
 
                 // Queue button
                 let q_color = if self.current_tab == ViewTab::Queue { accent } else { Color32::from_rgb(170, 170, 170) };
-                if ui.add(egui::Button::new(egui::RichText::new("📑").size(15.0).color(q_color)).frame(false))
+                if ui.add(egui::Button::new(egui::RichText::new("📑").size(14.5).color(q_color)).frame(false))
                     .on_hover_text("Ver Cola de Reproducción").clicked()
                 {
                     self.current_tab = ViewTab::Queue;
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(6.0);
 
-                // Custom Spotify Volume Bar (90px)
-                if let Some(new_vol) = Self::custom_spotify_volume_bar(ui, self.volume, 90.0, accent) {
+                // Custom Spotify Volume Bar (80px)
+                if let Some(new_vol) = Self::custom_spotify_volume_bar(ui, self.volume, 80.0, accent) {
                     self.volume = new_vol;
                     self.audio.set_volume(new_vol);
                     self.library.last_volume = Some(new_vol);
                     self.library.save();
                 }
 
-                ui.add_space(6.0);
+                ui.add_space(4.0);
 
                 // Volume icon toggle
                 let vol_icon = if self.volume == 0 { "🔇" } else if self.volume < 50 { "🔉" } else { "🔊" };
@@ -1631,7 +2319,12 @@ impl MelodyfyApp {
                 if let Some(ref t) = curr_track {
                     let (art_rect, _) = ui.allocate_exact_size(Vec2::new(36.0, 36.0), egui::Sense::hover());
                     ui.painter().rect_filled(art_rect, Rounding::same(4.0), Color32::from_rgb(32, 32, 32));
-                    ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(16.0), Color32::WHITE);
+                    ui.put(
+                        art_rect,
+                        egui::Image::new(crate::APP_LOGO_URI)
+                            .fit_to_exact_size(Vec2::new(36.0, 36.0))
+                            .rounding(Rounding::same(4.0)),
+                    );
                     if !t.thumbnail_url.is_empty() {
                         ui.put(
                             art_rect,
@@ -1653,7 +2346,13 @@ impl MelodyfyApp {
                         ui.label(egui::RichText::new(&t.artist).size(10.0).color(Color32::from_rgb(160, 160, 160)));
                     });
                 } else {
-                    ui.label(egui::RichText::new("Melodyfy").strong().size(13.0).color(Color32::WHITE));
+                    ui.add(
+                        egui::Image::new(crate::APP_LOGO_URI)
+                            .fit_to_exact_size(Vec2::new(32.0, 32.0))
+                            .rounding(Rounding::same(4.0)),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("Melodyfy Rust").strong().size(13.0).color(Color32::WHITE));
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1768,7 +2467,13 @@ impl MelodyfyApp {
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(12.0);
-                    ui.label(egui::RichText::new("🟢 Melodyfy").strong().size(16.0).color(Color32::WHITE));
+                    ui.add(
+                        egui::Image::new(crate::APP_LOGO_URI)
+                            .fit_to_exact_size(Vec2::new(28.0, 28.0))
+                            .rounding(Rounding::same(6.0)),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("Melodyfy Rust").strong().size(16.0).color(Color32::WHITE));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(12.0);
@@ -1801,7 +2506,10 @@ impl MelodyfyApp {
                 match self.current_tab {
                     ViewTab::Home => self.render_mobile_home_view(ui, accent),
                     ViewTab::Search => self.render_mobile_search_view(ui, accent),
-                    ViewTab::Favorites | ViewTab::History | ViewTab::Queue => self.render_mobile_library_view(ui, accent),
+                    ViewTab::Favorites | ViewTab::Playlists | ViewTab::Downloads | ViewTab::History | ViewTab::Queue => {
+                        self.render_mobile_library_view(ui, accent)
+                    }
+                    ViewTab::Lyrics => self.render_lyrics_view(ui, accent),
                 }
             });
         });
@@ -1841,6 +2549,12 @@ impl MelodyfyApp {
                 // Miniature Thumbnail 40x40
                 let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(40.0, 40.0), egui::Sense::hover());
                 ui.painter().rect_filled(thumb_rect, Rounding::same(5.0), Color32::from_rgb(20, 20, 20));
+                ui.put(
+                    thumb_rect,
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(40.0, 40.0))
+                        .rounding(Rounding::same(5.0)),
+                );
                 if !track.thumbnail_url.is_empty() {
                     ui.put(
                         thumb_rect,
@@ -1848,8 +2562,6 @@ impl MelodyfyApp {
                             .fit_to_exact_size(Vec2::new(40.0, 40.0))
                             .rounding(Rounding::same(5.0)),
                     );
-                } else {
-                    ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(18.0), Color32::WHITE);
                 }
 
                 ui.add_space(8.0);
@@ -1924,6 +2636,12 @@ impl MelodyfyApp {
             let art_w = (ui.available_width() - 48.0).clamp(240.0, 310.0);
             let (art_rect, _) = ui.allocate_exact_size(Vec2::new(art_w, art_w), egui::Sense::hover());
             ui.painter().rect_filled(art_rect, Rounding::same(12.0), Color32::from_rgb(28, 28, 28));
+            ui.put(
+                art_rect,
+                egui::Image::new(crate::APP_LOGO_URI)
+                    .fit_to_exact_size(Vec2::new(art_w, art_w))
+                    .rounding(Rounding::same(12.0)),
+            );
 
             if let Some(ref t) = curr_track {
                 if !t.thumbnail_url.is_empty() {
@@ -1933,11 +2651,7 @@ impl MelodyfyApp {
                             .fit_to_exact_size(Vec2::new(art_w, art_w))
                             .rounding(Rounding::same(12.0)),
                     );
-                } else {
-                    ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(64.0), Color32::WHITE);
                 }
-            } else {
-                ui.painter().text(art_rect.center(), egui::Align2::CENTER_CENTER, "🎧", FontId::proportional(64.0), Color32::GRAY);
             }
 
             ui.add_space(20.0);
@@ -2090,6 +2804,26 @@ impl MelodyfyApp {
                         self.show_mobile_fullscreen_player = false;
                         self.current_tab = ViewTab::Queue;
                     }
+
+                    ui.add_space(12.0);
+
+                    if ui.add(egui::Button::new(egui::RichText::new("🎤").size(18.0).color(accent)).frame(false))
+                        .on_hover_text("Ver Letras Sincronizadas").clicked()
+                    {
+                        self.show_mobile_fullscreen_player = false;
+                        self.current_tab = ViewTab::Lyrics;
+                        self.fetch_lyrics_for_current();
+                    }
+
+                    ui.add_space(12.0);
+
+                    if let Some(ref t) = curr_track {
+                        if ui.add(egui::Button::new(egui::RichText::new("⬇").size(18.0).color(Color32::WHITE)).frame(false))
+                            .on_hover_text("Descargar Pista sin DRM").clicked()
+                        {
+                            self.start_download(t.clone());
+                        }
+                    }
                 });
             });
         });
@@ -2226,8 +2960,9 @@ impl MelodyfyApp {
 
             let subtabs = [
                 (0, format!("💚 Me Gusta ({})", self.library.favorites.len())),
-                (1, "🕒 Historial".to_string()),
-                (2, format!("📑 Cola ({})", self.queue.len())),
+                (1, format!("💾 Offline ({})", self.library.downloads.len())),
+                (2, "🕒 Historial".to_string()),
+                (3, format!("📑 Cola ({})", self.queue.len())),
             ];
 
             for (idx, label) in subtabs {
@@ -2235,12 +2970,15 @@ impl MelodyfyApp {
                 let bg_col = if is_active { accent } else { Color32::from_rgb(32, 32, 32) };
                 let txt_col = if is_active { Color32::BLACK } else { Color32::WHITE };
 
-                let pill = egui::Button::new(egui::RichText::new(label).size(11.0).strong().color(txt_col))
+                let pill = egui::Button::new(egui::RichText::new(label).size(10.5).strong().color(txt_col))
                     .fill(bg_col)
                     .rounding(Rounding::same(12.0));
 
                 if ui.add(pill).clicked() {
                     self.mobile_library_subtab = idx;
+                    if idx == 1 {
+                        self.library.scan_local_downloads();
+                    }
                 }
                 ui.add_space(4.0);
             }
@@ -2262,6 +3000,18 @@ impl MelodyfyApp {
                 }
             }
             1 => {
+                let downs = self.library.downloads.clone();
+                if downs.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        ui.label(egui::RichText::new("No hay descargas offline todavía. Usa ⬇ para guardar.").color(Color32::GRAY));
+                    });
+                }
+                for (idx, track) in downs.iter().enumerate() {
+                    self.render_mobile_track_row(ui, track, idx, accent);
+                }
+            }
+            2 => {
                 let hist = self.library.history.clone();
                 for (idx, track) in hist.iter().enumerate() {
                     self.render_mobile_track_row(ui, track, idx, accent);
@@ -2317,6 +3067,12 @@ impl MelodyfyApp {
                 // Thumbnail 42x42
                 let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(42.0, 42.0), egui::Sense::hover());
                 ui.painter().rect_filled(thumb_rect, Rounding::same(4.0), Color32::from_rgb(24, 24, 24));
+                ui.put(
+                    thumb_rect,
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(42.0, 42.0))
+                        .rounding(Rounding::same(4.0)),
+                );
                 if !track.thumbnail_url.is_empty() {
                     ui.put(
                         thumb_rect,
@@ -2324,8 +3080,6 @@ impl MelodyfyApp {
                             .fit_to_exact_size(Vec2::new(42.0, 42.0))
                             .rounding(Rounding::same(4.0)),
                     );
-                } else {
-                    ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "🎵", FontId::proportional(16.0), Color32::WHITE);
                 }
 
                 ui.add_space(8.0);

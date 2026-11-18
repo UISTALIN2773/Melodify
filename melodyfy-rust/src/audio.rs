@@ -14,6 +14,7 @@ pub enum AudioCommand {
     Stop,
     Seek(f64),
     SetVolume(i32),
+    SetPlaybackRate(f64),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -22,6 +23,7 @@ pub struct AudioStatus {
     pub position: f64,
     pub duration: f64,
     pub volume: i32,
+    pub playback_rate: f64,
 }
 
 pub struct AudioEngine {
@@ -37,6 +39,7 @@ impl AudioEngine {
             position: 0.0,
             duration: 0.0,
             volume: 100,
+            playback_rate: 1.0,
         }));
         let status_clone = Arc::clone(&status);
 
@@ -50,19 +53,46 @@ impl AudioEngine {
             };
 
             let _ = player.SetVolume(1.0);
+            let mut desired_rate: f64 = 1.0;
 
             loop {
                 while let Ok(cmd) = cmd_rx.try_recv() {
                     match cmd {
-                        AudioCommand::PlayUrl(url) => {
-                            if let Ok(uri) = Uri::CreateUri(&HSTRING::from(url)) {
+                        AudioCommand::PlayUrl(raw_url) => {
+                            let final_uri_str = if let Some(local_rel) = raw_url.strip_prefix("local:") {
+                                if let Ok(abs) = std::fs::canonicalize(local_rel) {
+                                    let s = abs.to_string_lossy().replace('\\', "/");
+                                    let clean = s.strip_prefix("//?/").unwrap_or(&s);
+                                    format!("file:///{}", clean)
+                                } else {
+                                    raw_url
+                                }
+                            } else if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") && !raw_url.starts_with("file://") {
+                                if let Ok(abs) = std::fs::canonicalize(&raw_url) {
+                                    let s = abs.to_string_lossy().replace('\\', "/");
+                                    let clean = s.strip_prefix("//?/").unwrap_or(&s);
+                                    format!("file:///{}", clean)
+                                } else {
+                                    raw_url
+                                }
+                            } else {
+                                raw_url
+                            };
+
+                            if let Ok(uri) = Uri::CreateUri(&HSTRING::from(final_uri_str)) {
                                 if let Ok(source) = MediaSource::CreateFromUri(&uri) {
                                     let _ = player.SetSource(&source);
+                                    if let Ok(session) = player.PlaybackSession() {
+                                        let _ = session.SetPlaybackRate(desired_rate);
+                                    }
                                     let _ = player.Play();
                                 }
                             }
                         }
                         AudioCommand::Play => {
+                            if let Ok(session) = player.PlaybackSession() {
+                                let _ = session.SetPlaybackRate(desired_rate);
+                            }
                             let _ = player.Play();
                         }
                         AudioCommand::Pause => {
@@ -83,6 +113,12 @@ impl AudioEngine {
                         AudioCommand::SetVolume(vol) => {
                             let vol_f64 = (vol.clamp(0, 100) as f64) / 100.0;
                             let _ = player.SetVolume(vol_f64);
+                        }
+                        AudioCommand::SetPlaybackRate(rate) => {
+                            desired_rate = rate.clamp(0.5, 2.0);
+                            if let Ok(session) = player.PlaybackSession() {
+                                let _ = session.SetPlaybackRate(desired_rate);
+                            }
                         }
                     }
                 }
@@ -111,6 +147,15 @@ impl AudioEngine {
                         dur = (ts_dur.Duration as f64) / 10_000_000.0;
                     }
 
+                    // Keep desired playback rate applied when playing
+                    if current_state == 3 {
+                        if let Ok(cur_rate) = session.PlaybackRate() {
+                            if (cur_rate - desired_rate).abs() > 0.01 {
+                                let _ = session.SetPlaybackRate(desired_rate);
+                            }
+                        }
+                    }
+
                     // Auto-advance trigger: if track reaches the end
                     if dur > 0.0 && pos >= (dur - 0.4) {
                         current_state = 8; // MediaEnded
@@ -126,6 +171,7 @@ impl AudioEngine {
                         lock.duration = dur;
                     }
                     lock.volume = vol;
+                    lock.playback_rate = desired_rate;
                 }
 
                 thread::sleep(Duration::from_millis(50));
@@ -166,6 +212,10 @@ impl AudioEngine {
 
     pub fn set_volume(&self, volume: i32) {
         let _ = self.cmd_tx.send(AudioCommand::SetVolume(volume));
+    }
+
+    pub fn set_playback_rate(&self, rate: f64) {
+        let _ = self.cmd_tx.send(AudioCommand::SetPlaybackRate(rate));
     }
 
     pub fn get_status(&self) -> AudioStatus {
