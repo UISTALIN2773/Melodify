@@ -89,21 +89,33 @@ cargo run --release
 ```text
 lite-music-player/
 │
-├── Melodyfy-Rust.exe         # Ejecutable nativo compilado en Rust (6.8 MB)
-├── iniciar_melodyfy_rust.bat # Lanzador rápido del reproductor Rust
-├── build_rust.bat            # Script de compilación release
-├── yt-dlp.exe                # Motor de extracción de audio y metadatos
-├── library.json              # Base de datos local (favoritos, historial, volumen)
+├── Melodyfy-Rust.exe         # Ejecutable nativo Desktop compilado en Rust (con logo.ico incrustado)
+├── Melodyfy-Mobile.apk       # APK nativo para Android (Arquitectura Mobile con ForegroundService)
+├── deploy_release.bat        # Auto-Deploy: Compila EXE + APK, empaqueta ZIP y publica GitHub Release
+├── build_rust.bat            # Script de compilación release Desktop
+├── assets/                   # Logo oficial (logo.jpg / logo.ico)
 │
-├── melodyfy-rust/            # Código fuente completo en Rust
+├── melodyfy-rust/            # Código fuente Desktop en Rust (egui + WinRT MediaPlayer)
 │   ├── Cargo.toml            # Dependencias y optimizaciones LTO
+│   ├── build.rs              # Incrustación nativa del icono Win32 (.ico) en el ejecutable
 │   └── src/
-│       ├── main.rs           # Punto de entrada y configuración de ventana
-│       ├── app.rs            # Interfaz gráfica egui (Spotify Dark, cola, eventos)
-│       ├── audio.rs          # Motor de audio nativo COM Win32 IDispatch
-│       ├── models.rs         # Modelos de datos (Track, Library, RepeatMode)
-│       └── streamer.rs       # Resolver asíncrono y caché de streams
+│       ├── main.rs           # Punto de entrada y configuración de ventana e icono
+│       ├── app.rs            # Interfaz gráfica egui (Spotify Dark, Playlists, Karaoke, DSP)
+│       ├── audio.rs          # Motor de audio nativo WinRT MediaPlayer + velocidad DSP
+│       ├── innertube.rs      # Búsqueda y streaming HTTP directo en Rust puro
+│       ├── lyrics.rs         # Cliente LRCLIB y parser LRC sincronizado
+│       ├── models.rs         # Modelos de datos (Track, AppLibrary, Playlists, Offline)
+│       └── streamer.rs       # Resolver híbrido InnerTube/yt-dlp, caché y descargas .m4a
 │
-├── Melodyfy.cs               # Versión legacy en C# WinForms
+├── melodyfy-mobile/          # Proyecto nativo Android (Arquitectura Mobile real -> .apk)
+│   ├── pubspec.yaml          # just_audio, audio_service (MediaSession), provider, launcher_icons
+│   ├── android/              # Configuración nativa Android (ForegroundService, WakeLock, Iconos)
+│   └── lib/
+│       ├── main.dart         # Shell móvil (Bottom Nav + MiniPlayer + AudioService)
+│       ├── models/           # Track, QuickTag, RepeatMode, LyricsData
+│       ├── services/         # AudioHandler, InnerTubeService, LyricsService, DownloadService, LibraryService
+│       ├── providers/        # PlayerProvider (estado global móvil)
+│       └── ui/               # Pantallas táctiles (Home, Search, Library, Fullscreen Player, Karaoke)
+│
 └── README.md                 # Esta documentación
 ```

@@ -20,8 +20,11 @@ Melodyfy-Rust.exe
 Melodyfy-Rust - copia.exe
 Melodyfy-Rust.old
 Melodyfy-Mobile.exe
+*.apk
 *.old
 yt-dlp.exe
+melodyfy-mobile/build/
+melodyfy-mobile/.dart_tool/
 
 # --- Artefactos de Compilación .NET / C# ---
 [Bb]in/
