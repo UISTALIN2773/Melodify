@@ -59,28 +59,17 @@
 
 ---
 
-## 🚀 Cómo Ejecutar
+## 🚀 Cómo Ejecutar y Compilar
 
-### Opción 1: Ejecutable directo (Listo para usar)
-Simplemente haz doble clic en:
-```text
-Melodyfy-Rust.exe
-```
-O ejecuta:
-```cmd
-iniciar_melodyfy_rust.bat
-```
+### Opción 1: Descarga Directa (GitHub Releases)
+* **Windows Desktop:** Ejecuta `Melodyfy-Rust.exe`.
+* **Android Mobile:** Instala `Melodyfy-Mobile.apk` en tu teléfono Android.
 
-### Opción 2: Compilar desde código fuente (Rust)
-Requisitos: Tener instalado [Rust y Cargo](https://rustup.rs/).
+### Opción 2: Compilar y Publicar todo con 1 solo script
 ```cmd
-build_rust.bat
+deploy_release.bat
 ```
-O directamente con Cargo:
-```cmd
-cd melodyfy-rust
-cargo run --release
-```
+*(Compila `Melodyfy-Rust.exe` + `Melodyfy-Mobile.apk`, genera el `.zip` portable, hace `git push` y publica el Release en GitHub sin PowerShell).*
 
 ---
 
@@ -91,8 +80,7 @@ lite-music-player/
 │
 ├── Melodyfy-Rust.exe         # Ejecutable nativo Desktop compilado en Rust (con logo.ico incrustado)
 ├── Melodyfy-Mobile.apk       # APK nativo para Android (Arquitectura Mobile con ForegroundService)
-├── deploy_release.bat        # Auto-Deploy: Compila EXE + APK, empaqueta ZIP y publica GitHub Release
-├── build_rust.bat            # Script de compilación release Desktop
+├── deploy_release.bat        # Único script batch: compila EXE + APK, empaqueta ZIP y sube Release
 ├── assets/                   # Logo oficial (logo.jpg / logo.ico)
 │
 ├── melodyfy-rust/            # Código fuente Desktop en Rust (egui + WinRT MediaPlayer)
