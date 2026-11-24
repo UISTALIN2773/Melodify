@@ -2,9 +2,12 @@ use crate::audio::AudioEngine;
 use crate::models::{AppLibrary, RepeatMode, Track};
 use crate::streamer::Streamer;
 use eframe::egui::{self, Color32, FontId, Rounding, Vec2};
+use std::os::windows::process::CommandExt;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::Instant;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewTab {
@@ -494,7 +497,8 @@ impl eframe::App for MelodyfyApp {
 
                                 let mut cmd = std::process::Command::new(&ffplay_path);
                                 cmd.args(&[
-                                    "-noborder",
+                                    "-loglevel", "quiet",
+                                    "-nostats",
                                     "-alwaysontop",
                                     "-x", "426",
                                     "-y", "240",
@@ -503,7 +507,11 @@ impl eframe::App for MelodyfyApp {
                                     "-window_title", "Melodyfy Video PiP",
                                     "-ss", &format!("{:.1}", start_pos),
                                     &video_url,
-                                ]);
+                                ])
+                                .stdin(std::process::Stdio::null())
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .creation_flags(CREATE_NO_WINDOW);
 
                                 match cmd.spawn() {
                                     Ok(child) => {
@@ -2572,6 +2580,8 @@ impl MelodyfyApp {
             self.pip_last_interaction = Instant::now();
             let corner_pos = Self::get_screen_corner_pos(self.pip_corner, 426.0, 240.0);
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(426.0, 240.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(240.0, 120.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Resizable(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner_pos));
             ctx.send_viewport_cmd(egui::ViewportCommand::Title("📺 Melodyfy — PiP Video Player".into()));
@@ -2585,6 +2595,7 @@ impl MelodyfyApp {
             self.audio.play();
 
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1150.0, 740.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(320.0, 480.0)));
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
             ctx.send_viewport_cmd(egui::ViewportCommand::Title("🎧 Melodyfy Rust — Reproductor Libre, Rápido y Sin Anuncios".into()));
         }
@@ -2707,7 +2718,13 @@ impl MelodyfyApp {
                 ui.vertical(|ui| {
                     ui.add_space(6.0);
 
-                    // ================= TOP BAR =================
+                    // ================= TOP BAR (Draggable) =================
+                    let top_bar_rect = egui::Rect::from_min_size(rect.left_top(), Vec2::new(rect.width(), 32.0));
+                    let drag_resp = ui.interact(top_bar_rect, ui.id().with("pip_win_drag"), egui::Sense::drag());
+                    if drag_resp.dragged() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
 
