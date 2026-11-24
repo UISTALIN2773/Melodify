@@ -14,8 +14,9 @@ if exist "C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Buil
     call "C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Build\vcvars64.bat" >nul
 )
 if exist "C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\km\crt" (
-    set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\km\crt;%~dp0melodyfy-rust\target\include;%INCLUDE%;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\shared"
-    set "LIB=%LIB%;%~dp0melodyfy-rust\target\libs;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\km\x64"
+    set "INCLUDE=%~dp0melodyfy-rust\target\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\km\crt;%INCLUDE%;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\shared"
+    set "LIB=%~dp0melodyfy-rust\target\libs;%LIB%;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\km\x64"
+    set "PATH=%~dp0melodyfy-rust\target\libs;%PATH%"
 )
 
 :: 2. Compilar Desktop Rust (.exe con logo.ico incrustado)

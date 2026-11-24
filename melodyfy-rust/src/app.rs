@@ -61,6 +61,12 @@ pub struct MelodyfyApp {
     // Mini Player
     is_mini_mode: bool,
 
+    // Video PiP (Picture-in-Picture) Floating Overlay Mode for Gaming
+    pub is_pip_video_mode: bool,
+    pub pip_corner: usize, // 0 = Bottom-Right, 1 = Top-Right, 2 = Bottom-Left, 3 = Top-Left
+    pub pip_opacity: f32, // 1.0, 0.85, 0.70
+    pub pip_last_interaction: Instant,
+
     // Theme Accent (true = Spotify Green, false = Melodyfy Amber)
     use_spotify_green: bool,
 
@@ -126,6 +132,10 @@ impl MelodyfyApp {
             new_playlist_name: String::new(),
             toast_message: None,
             is_mini_mode: false,
+            is_pip_video_mode: false,
+            pip_corner: 0,
+            pip_opacity: 1.0,
+            pip_last_interaction: Instant::now(),
             use_spotify_green: true,
             is_editing_tags: false,
             show_add_tag_dialog: false,
@@ -369,6 +379,11 @@ impl MelodyfyApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // Toggle PiP Video Mode: Ctrl + P (or Esc if currently in PiP)
+        if ctx.input(|i| (i.modifiers.ctrl && i.key_pressed(egui::Key::P)) || (self.is_pip_video_mode && i.key_pressed(egui::Key::Escape))) {
+            self.toggle_pip_mode(ctx);
+        }
+
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) && !ctx.wants_keyboard_input() {
             self.audio.toggle_play_pause();
         }
@@ -535,6 +550,16 @@ impl eframe::App for MelodyfyApp {
             } else {
                 self.toast_message = None;
             }
+        }
+
+        // Video PiP (Picture-in-Picture) Floating Overlay Mode for Gaming
+        if self.is_pip_video_mode {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(Color32::from_black_alpha((self.pip_opacity * 255.0) as u8)))
+                .show(ctx, |ui| {
+                    self.render_pip_video_ui(ui, accent);
+                });
+            return;
         }
 
         // Mini-Player / Segundo Plano Mode: Compact Floating HUD
@@ -2099,6 +2124,15 @@ impl MelodyfyApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(14.0);
 
+                // Video PiP Floating Overlay Button (426x240 Always-on-Top)
+                if ui.add(egui::Button::new(egui::RichText::new("📺").size(14.5)).frame(false))
+                    .on_hover_text("Modo Visor PiP Video para Juegos (Ventana Anclada 16:9, <30MB RAM)").clicked()
+                {
+                    self.toggle_pip_mode(ui.ctx());
+                }
+
+                ui.add_space(4.0);
+
                 // Mini-Player / Background Mode HUD (440x120 floating)
                 let mini_icon = if self.is_mini_mode { "🪟" } else { "🕹️" };
                 if ui.add(egui::Button::new(egui::RichText::new(mini_icon).size(14.5)).frame(false))
@@ -2357,6 +2391,10 @@ impl MelodyfyApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(6.0);
+                    if ui.small_button("📺 PiP Video").on_hover_text("Cambiar a modo visor PiP 16:9 con video").clicked() {
+                        self.is_mini_mode = false;
+                        self.toggle_pip_mode(ui.ctx());
+                    }
                     if ui.small_button("🪟 Maximizar").on_hover_text("Regresar a ventana completa (1150x740)").clicked() {
                         self.is_mini_mode = false;
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1150.0, 740.0)));
@@ -2397,6 +2435,296 @@ impl MelodyfyApp {
                 ui.label(egui::RichText::new(format!("{}:{:02}", cur_secs / 60, cur_secs % 60)).size(10.5).color(Color32::from_rgb(170, 170, 170)));
             });
         });
+    }
+
+    // =========================================================================================
+    // =============================== VIDEO PiP GAMING MODE (16:9) ============================
+    // =========================================================================================
+
+    pub fn get_screen_corner_pos(corner: usize, win_w: f32, win_h: f32) -> egui::Pos2 {
+        let (screen_w, screen_h) = unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            let w = GetSystemMetrics(SM_CXSCREEN) as f32;
+            let h = GetSystemMetrics(SM_CYSCREEN) as f32;
+            (if w > 100.0 { w } else { 1920.0 }, if h > 100.0 { h } else { 1080.0 })
+        };
+        let margin = 20.0;
+        let bottom_margin = 60.0;
+        match corner {
+            0 => egui::pos2((screen_w - win_w - margin).max(0.0), (screen_h - win_h - bottom_margin).max(0.0)), // Bottom-Right
+            1 => egui::pos2((screen_w - win_w - margin).max(0.0), margin + 15.0),                                // Top-Right
+            2 => egui::pos2(margin, (screen_h - win_h - bottom_margin).max(0.0)),                                // Bottom-Left
+            _ => egui::pos2(margin, margin + 15.0),                                                               // Top-Left
+        }
+    }
+
+    pub fn toggle_pip_mode(&mut self, ctx: &egui::Context) {
+        self.is_pip_video_mode = !self.is_pip_video_mode;
+        if self.is_pip_video_mode {
+            self.is_mini_mode = false;
+            self.pip_last_interaction = Instant::now();
+            let corner_pos = Self::get_screen_corner_pos(self.pip_corner, 426.0, 240.0);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(426.0, 240.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner_pos));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title("📺 Melodyfy — PiP Video Player".into()));
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1150.0, 740.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title("🎧 Melodyfy Rust — Reproductor Libre, Rápido y Sin Anuncios".into()));
+        }
+    }
+
+    fn render_pip_video_ui(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        let status = self.audio.get_status();
+        let curr_track = self.current_track().cloned();
+        let rect = ui.available_rect_before_wrap();
+
+        // Detect hover or mouse activity to reset auto-hide timer
+        let is_hovered = ui.rect_contains_pointer(rect);
+        if is_hovered {
+            self.pip_last_interaction = Instant::now();
+        }
+        let show_hud = self.pip_last_interaction.elapsed().as_secs_f32() < 2.5;
+
+        // Keyboard navigation in PiP mode
+        ui.ctx().input(|i| {
+            if i.key_pressed(egui::Key::C) {
+                self.pip_corner = (self.pip_corner + 1) % 4;
+                let pos = Self::get_screen_corner_pos(self.pip_corner, 426.0, 240.0);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+            }
+            if i.key_pressed(egui::Key::O) {
+                self.pip_opacity = match self.pip_opacity {
+                    o if o > 0.9 => 0.85,
+                    o if o > 0.75 => 0.70,
+                    _ => 1.0,
+                };
+            }
+        });
+
+        // 1. VIDEO SURFACE & VISUALIZER
+        // Dark cinematic background
+        ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_rgb(12, 12, 12));
+
+        if let Some(ref t) = curr_track {
+            if !t.thumbnail_url.is_empty() {
+                ui.put(
+                    rect,
+                    egui::Image::new(&t.thumbnail_url)
+                        .fit_to_exact_size(rect.size())
+                        .rounding(Rounding::ZERO),
+                );
+            } else {
+                ui.put(
+                    rect,
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(rect.size())
+                        .rounding(Rounding::ZERO),
+                );
+            }
+
+            // Real-time audio spectrum equalizer bars over bottom of video
+            if status.state == 3 {
+                let bar_count = 32;
+                let bar_spacing = rect.width() / (bar_count as f32);
+                let bar_width = (bar_spacing * 0.7).max(2.0);
+                let base_y = rect.bottom() - 3.0;
+                let time_val = status.position * 8.0;
+
+                for idx in 0..bar_count {
+                    let phase = (idx as f64) * 0.45;
+                    let wave1 = (time_val + phase).sin().abs();
+                    let wave2 = (time_val * 1.5 + phase * 2.0).cos().abs();
+                    let h_factor = ((wave1 * 0.6 + wave2 * 0.4) as f32).clamp(0.08, 1.0);
+                    let bar_h = h_factor * 26.0;
+
+                    let bar_x = rect.left() + (idx as f32) * bar_spacing + (bar_spacing - bar_width) * 0.5;
+                    let bar_rect = egui::Rect::from_min_size(
+                        egui::pos2(bar_x, base_y - bar_h),
+                        Vec2::new(bar_width, bar_h),
+                    );
+                    let bar_col = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 140);
+                    ui.painter().rect_filled(bar_rect, Rounding::same(1.5), bar_col);
+                }
+            }
+
+            // Discreet badge when HUD is hidden
+            if !show_hud {
+                let is_playing = status.state == 3;
+                let badge_text = if is_playing { "🔴 PiP" } else { "⏸️ PiP" };
+                let badge_pos = rect.left_top() + Vec2::new(8.0, 8.0);
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(badge_pos, Vec2::new(48.0, 18.0)),
+                    Rounding::same(4.0),
+                    Color32::from_black_alpha(160),
+                );
+                ui.painter().text(
+                    badge_pos + Vec2::new(24.0, 9.0),
+                    egui::Align2::CENTER_CENTER,
+                    badge_text,
+                    FontId::proportional(10.0),
+                    if is_playing { Color32::from_rgb(255, 80, 80) } else { Color32::LIGHT_GRAY },
+                );
+            }
+        } else {
+            // Idle state
+            ui.vertical_centered(|ui| {
+                ui.add_space(60.0);
+                ui.add(
+                    egui::Image::new(crate::APP_LOGO_URI)
+                        .fit_to_exact_size(Vec2::new(48.0, 48.0))
+                        .rounding(Rounding::same(8.0)),
+                );
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("📺 Melodyfy Visor PiP").strong().size(13.0).color(Color32::WHITE));
+                ui.label(egui::RichText::new("Selecciona una pista para reproducir").size(10.5).color(Color32::GRAY));
+            });
+        }
+
+        // 2. CINEMATIC OVERLAY HUD (Appears on hover)
+        if show_hud {
+            // Dark gradient backdrop
+            ui.painter().rect_filled(rect, Rounding::ZERO, Color32::from_black_alpha(175));
+
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.vertical(|ui| {
+                    ui.add_space(6.0);
+
+                    // ================= TOP BAR =================
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+
+                        // Quick corner snaps
+                        let corners = [("↖", 3), ("↗", 1), ("↙", 2), ("↘", 0)];
+                        for (sym, c_idx) in corners {
+                            let is_curr = self.pip_corner == c_idx;
+                            let btn_color = if is_curr { accent } else { Color32::WHITE };
+                            if ui.add(egui::Button::new(egui::RichText::new(sym).size(11.0).color(btn_color)).frame(false))
+                                .on_hover_text(format!("Anclar a esquina {}", sym)).clicked()
+                            {
+                                self.pip_corner = c_idx;
+                                let pos = Self::get_screen_corner_pos(c_idx, 426.0, 240.0);
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+                            }
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Track title clipped
+                        if let Some(ref t) = curr_track {
+                            let title_clipped = if t.title.chars().count() > 18 {
+                                format!("{}...", t.title.chars().take(16).collect::<String>())
+                            } else {
+                                t.title.clone()
+                            };
+                            ui.label(egui::RichText::new(title_clipped).strong().size(11.5).color(Color32::WHITE));
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(8.0);
+
+                            // Restore full window
+                            if ui.add(egui::Button::new(egui::RichText::new("🪟 Full").size(11.0).color(Color32::WHITE)).frame(false))
+                                .on_hover_text("Restaurar ventana completa (1150x740)").clicked()
+                            {
+                                self.toggle_pip_mode(ui.ctx());
+                            }
+
+                            // Switch to audio HUD mini mode
+                            if ui.add(egui::Button::new(egui::RichText::new("🕹️ Mini").size(11.0).color(Color32::from_rgb(180, 180, 180))).frame(false))
+                                .on_hover_text("Cambiar a barra de audio compacta (440x120)").clicked()
+                            {
+                                self.is_pip_video_mode = false;
+                                self.is_mini_mode = true;
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(440.0, 120.0)));
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title("🕹️ Melodyfy Mini Player".into()));
+                            }
+
+                            // Opacity toggle
+                            let op_label = format!("👁️{}%", (self.pip_opacity * 100.0) as u32);
+                            if ui.add(egui::Button::new(egui::RichText::new(op_label).size(10.5).color(Color32::from_rgb(190, 190, 190))).frame(false))
+                                .on_hover_text("Cambiar opacidad (100% / 85% / 70%)").clicked()
+                            {
+                                self.pip_opacity = match self.pip_opacity {
+                                    o if o > 0.9 => 0.85,
+                                    o if o > 0.75 => 0.70,
+                                    _ => 1.0,
+                                };
+                            }
+                        });
+                    });
+
+                    // ================= CENTER CONTROLS =================
+                    ui.add_space(38.0);
+                    ui.horizontal_centered(|ui| {
+                        let total_w = ui.available_width();
+                        ui.add_space((total_w - 140.0) * 0.5);
+
+                        if ui.add(egui::Button::new(egui::RichText::new("⏮").size(16.0).color(Color32::WHITE)).frame(false)).clicked() {
+                            self.play_prev();
+                        }
+
+                        ui.add_space(8.0);
+
+                        let is_playing = status.state == 3;
+                        let play_sym = if is_playing { "⏸" } else { "▶" };
+                        let play_btn = egui::Button::new(
+                            egui::RichText::new(play_sym).strong().size(18.0).color(Color32::BLACK)
+                        )
+                        .fill(accent)
+                        .rounding(Rounding::same(20.0))
+                        .min_size(Vec2::new(40.0, 40.0));
+
+                        if ui.add(play_btn).clicked() {
+                            self.audio.toggle_play_pause();
+                        }
+
+                        ui.add_space(8.0);
+
+                        if ui.add(egui::Button::new(egui::RichText::new("⏭").size(16.0).color(Color32::WHITE)).frame(false)).clicked() {
+                            self.play_next();
+                        }
+                    });
+
+                    // ================= BOTTOM BAR =================
+                    ui.add_space(32.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+
+                        let cur_secs = status.position as u64;
+                        let dur_secs = if status.duration > 0.0 {
+                            status.duration as u64
+                        } else if let Some(ref t) = curr_track {
+                            t.duration_seconds
+                        } else {
+                            0
+                        };
+                        let max_dur = if dur_secs > 0 { dur_secs as f64 } else { 100.0 };
+
+                        let seekbar_w = (ui.available_width() - 120.0).max(100.0);
+                        if let Some(new_pos) = Self::custom_spotify_seekbar(ui, status.position, max_dur, seekbar_w, accent) {
+                            self.audio.seek(new_pos);
+                        }
+
+                        let time_str = format!("{}:{:02}/{}:{:02}", cur_secs / 60, cur_secs % 60, dur_secs / 60, dur_secs % 60);
+                        ui.label(egui::RichText::new(time_str).size(9.5).color(Color32::from_rgb(180, 180, 180)));
+
+                        // Volume mute toggle
+                        let vol_icon = if status.volume == 0 { "🔇" } else { "🔊" };
+                        if ui.add(egui::Button::new(egui::RichText::new(vol_icon).size(11.0)).frame(false)).clicked() {
+                            if self.volume > 0 {
+                                self.volume = 0;
+                            } else {
+                                self.volume = 80;
+                            }
+                            self.audio.set_volume(self.volume);
+                        }
+                    });
+                });
+            });
+        }
     }
 
     // =========================================================================================

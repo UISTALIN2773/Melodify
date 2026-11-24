@@ -134,6 +134,80 @@ impl InnerTube {
         None
     }
 
+    /// Resuelve la URL directa HTTPS de video MP4 (480p/720p muxed) para el visor PiP
+    #[allow(dead_code)]
+    pub fn resolve_video_stream_url(video_id: &str) -> Option<String> {
+        if let Some(url) = Self::try_client_video(video_id, "ANDROID", "19.09.37", Some(30)) {
+            return Some(url);
+        }
+        if let Some(url) = Self::try_client_video(video_id, "IOS", "19.09.3", None) {
+            return Some(url);
+        }
+        None
+    }
+
+    fn try_client_video(video_id: &str, client_name: &str, client_version: &str, sdk_ver: Option<u32>) -> Option<String> {
+        let mut client_obj = json!({
+            "clientName": client_name,
+            "clientVersion": client_version,
+            "hl": "es",
+            "gl": "US"
+        });
+
+        if let Some(sdk) = sdk_ver {
+            if let Some(obj) = client_obj.as_object_mut() {
+                obj.insert("androidSdkVersion".to_string(), json!(sdk));
+            }
+        }
+
+        let payload = json!({
+            "context": {
+                "client": client_obj
+            },
+            "videoId": video_id
+        });
+
+        let resp = ureq::post("https://www.youtube.com/youtubei/v1/player")
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .send_json(&payload)
+            .ok()?;
+
+        let json_val: serde_json::Value = resp.into_body().read_json().ok()?;
+        let streaming_data = json_val.get("streamingData")?;
+
+        // 1. Priorizar streams muxed (video MP4 con audio integrado)
+        if let Some(formats) = streaming_data.get("formats").and_then(|f| f.as_array()) {
+            for fmt in formats {
+                let mime = fmt.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
+                if mime.contains("video/mp4") {
+                    if let Some(url) = fmt.get("url").and_then(|u| u.as_str()) {
+                        if !url.is_empty() {
+                            return Some(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback a adaptiveFormats <= 720p
+        if let Some(formats) = streaming_data.get("adaptiveFormats").and_then(|f| f.as_array()) {
+            for fmt in formats {
+                let mime = fmt.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
+                let height = fmt.get("height").and_then(|h| h.as_u64()).unwrap_or(0);
+                if mime.contains("video/mp4") && height <= 720 {
+                    if let Some(url) = fmt.get("url").and_then(|u| u.as_str()) {
+                        if !url.is_empty() {
+                            return Some(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     fn try_client(video_id: &str, client_name: &str, client_version: &str, sdk_ver: Option<u32>) -> Option<String> {
         let mut client_obj = json!({
             "clientName": client_name,

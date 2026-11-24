@@ -388,6 +388,60 @@ impl Streamer {
         None
     }
 
+    #[allow(dead_code)]
+    pub fn resolve_video_stream_url(&self, track: &Track) -> Option<String> {
+        // Fast pure-Rust InnerTube resolution for muxed MP4 video (~120ms)
+        if let Some(video_url) = crate::innertube::InnerTube::resolve_video_stream_url(&track.id) {
+            if !video_url.is_empty() {
+                return Some(video_url);
+            }
+        }
+
+        let url_to_resolve = if track.webpage_url.is_empty() {
+            format!("https://www.youtube.com/watch?v={}", track.id)
+        } else {
+            track.webpage_url.clone()
+        };
+
+        // Fallback yt-dlp to 480p/720p muxed video stream
+        let mut cmd = Command::new(&self.yt_dlp_path);
+        cmd.args(&[
+            "-g",
+            "-f",
+            "18/22/b[height<=720][ext=mp4]/best[ext=mp4]/best",
+            "--no-warnings",
+            "--no-playlist",
+            "--no-check-certificates",
+            "--force-ipv4",
+            "--socket-timeout",
+            "5",
+            "--extractor-args",
+            "youtube:player_client=android",
+            &url_to_resolve,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                let stream_url = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+
+                if !stream_url.is_empty() {
+                    return Some(stream_url);
+                }
+            }
+        }
+
+        // Ultimate fallback to standard audio stream
+        self.resolve_stream_url(track)
+    }
+
     /// Descarga directa de la pista en formato audio M4A/AAC a la carpeta local 'downloads/'
     /// sin DRM propietario para reproducción libre y offline permanente.
     pub fn download_track_async(&self, track: Track, tx: Sender<(String, bool, Option<(Track, String)>)>) {
