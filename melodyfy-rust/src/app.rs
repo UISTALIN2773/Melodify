@@ -735,26 +735,26 @@ impl eframe::App for MelodyfyApp {
 
 impl MelodyfyApp {
     fn render_sidebar(&mut self, ui: &mut egui::Ui, accent: Color32) {
-        ui.add_space(16.0);
+        ui.add_space(8.0);
 
-        // App Branding with Official Melodyfy Rust Logo
+        // 1. BRANDING HEADER
         ui.horizontal(|ui| {
-            ui.add_space(14.0);
+            ui.add_space(6.0);
             ui.add(
                 egui::Image::new(crate::APP_LOGO_URI)
-                    .fit_to_exact_size(Vec2::new(42.0, 42.0))
+                    .fit_to_exact_size(Vec2::new(36.0, 36.0))
                     .rounding(Rounding::same(8.0)),
             );
             ui.add_space(8.0);
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Melodyfy").strong().size(20.0).color(Color32::WHITE));
-                ui.label(egui::RichText::new("SPOTIFY KILLER • RUST").size(9.0).color(accent).strong());
+                ui.label(egui::RichText::new("Melodyfy").strong().size(18.0).color(Color32::WHITE));
+                ui.label(egui::RichText::new("SPOTIFY KILLER • RUST").size(8.5).color(accent).strong());
             });
         });
 
-        ui.add_space(16.0);
+        ui.add_space(10.0);
 
-        // Navigation Tabs (Spotify Pill Style)
+        // 2. MAIN NAVIGATION TABS (Strictly Left-Aligned & Pixel-Perfect)
         let tabs = [
             (ViewTab::Home, "🏠", "Inicio"),
             (ViewTab::Search, "🔍", "Buscar"),
@@ -766,100 +766,138 @@ impl MelodyfyApp {
             (ViewTab::Lyrics, "🎤", "Letras Karaoke"),
         ];
 
+        let tab_btn_w = (ui.available_width() - 8.0).max(180.0);
+
         for (tab, icon, label) in tabs {
             let is_active = self.current_tab == tab;
-            let bg = if is_active { Color32::from_rgb(30, 30, 30) } else { Color32::TRANSPARENT };
+            let bg = if is_active { Color32::from_rgb(28, 28, 28) } else { Color32::TRANSPARENT };
             let text_color = if is_active { Color32::WHITE } else { Color32::from_rgb(175, 175, 175) };
 
-            let content = egui::RichText::new(format!("  {}   {}", icon, label))
-                .size(13.5)
-                .strong()
-                .color(text_color);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(tab_btn_w, 32.0), egui::Sense::click());
 
-            let btn = egui::Button::new(content)
-                .fill(bg)
-                .rounding(Rounding::same(8.0))
-                .min_size(Vec2::new(194.0, 34.0));
-
-            ui.horizontal(|ui| {
-                ui.add_space(8.0);
-                let (ind_rect, _) = ui.allocate_exact_size(Vec2::new(3.0, 22.0), egui::Sense::hover());
-                if is_active {
-                    ui.painter().rect_filled(ind_rect, Rounding::same(1.5), accent);
-                }
-                ui.add_space(3.0);
-                if ui.add(btn).clicked() {
-                    self.current_tab = tab;
-                    if tab == ViewTab::Lyrics {
-                        self.fetch_lyrics_for_current();
-                    } else if tab == ViewTab::Downloads {
-                        self.library.scan_local_downloads();
-                    }
-                }
-            });
-        }
-
-        ui.add_space(14.0);
-        ui.separator();
-        ui.add_space(8.0);
-
-        // Quick Curated Playlists
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label(egui::RichText::new("MIXES & GÉNEROS").size(10.5).color(Color32::from_rgb(120, 120, 120)).strong());
-        });
-
-        let genres = [
-            ("🎧 Lo-Fi Chill Gaming", "Lo-Fi Gaming Chill Beats"),
-            ("⚡ Synthwave & Cyberpunk", "Synthwave Cyberpunk 80s"),
-            ("🎸 Rock Legendario", "Rock Clásico 80s 90s"),
-            ("🔥 Top Global 2026", "Top Éxitos Mundiales 2026"),
-            ("🌸 Anime Openings", "Anime Openings HD"),
-            ("🚗 Phonk Drift Music", "Phonk Drift Bass boosted"),
-        ];
-
-        for (display, query) in genres {
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                if ui.link(egui::RichText::new(display).size(12.5).color(Color32::from_rgb(190, 190, 190))).clicked() {
-                    self.search_query = query.to_string();
-                    self.current_tab = ViewTab::Search;
-                    self.trigger_search(query);
-                }
-            });
-        }
-
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-            ui.add_space(12.0);
-
-            // Switch to Mobile Format (390x820)
-            if ui.add(egui::Button::new(egui::RichText::new("📱 Modo Móvil (9:16)").size(11.5).color(accent))
-                .fill(Color32::from_rgb(32, 32, 32))
-                .rounding(Rounding::same(8.0))
-                .min_size(Vec2::new(190.0, 30.0)))
-                .on_hover_text("Cambiar a interfaz táctil de smartphone (390x820)")
-                .clicked()
-            {
-                self.is_mobile_mode = true;
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(390.0, 820.0)));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title("📱 Melodyfy Mobile".into()));
+            if resp.hovered() && !is_active {
+                ui.painter().rect_filled(rect, Rounding::same(8.0), Color32::from_rgb(22, 22, 22));
+            } else if is_active {
+                ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
+                // Active accent bar on left edge
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(rect.left(), rect.top() + 5.0), Vec2::new(3.0, 22.0)),
+                    Rounding::same(1.5),
+                    accent,
+                );
             }
 
-            ui.add_space(6.0);
-
-            let theme_label = if self.use_spotify_green { "🟢 Verde Spotify" } else { "🟠 Ámbar Editorial" };
-            if ui.small_button(theme_label).on_hover_text("Cambiar color de acento").clicked() {
-                self.use_spotify_green = !self.use_spotify_green;
-            }
-
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("🚀 0% Publicidad • 100% Libre").size(10.0).color(Color32::from_rgb(110, 110, 110)));
-            ui.add_space(6.0);
-            ui.add(
-                egui::Image::new(crate::APP_LOGO_URI)
-                    .fit_to_exact_size(Vec2::new(48.0, 48.0))
-                    .rounding(Rounding::same(10.0)),
+            // Left-aligned icon and label in exact columns
+            ui.painter().text(
+                egui::pos2(rect.left() + 14.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                icon,
+                FontId::proportional(14.5),
+                if is_active { accent } else { Color32::from_rgb(180, 180, 180) },
             );
+            ui.painter().text(
+                egui::pos2(rect.left() + 38.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(13.0),
+                text_color,
+            );
+
+            if resp.clicked() {
+                self.current_tab = tab;
+                if tab == ViewTab::Lyrics {
+                    self.fetch_lyrics_for_current();
+                } else if tab == ViewTab::Downloads {
+                    self.library.scan_local_downloads();
+                }
+            }
+
+            ui.add_space(2.0);
+        }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        // 3. FOOTER PINNED AT BOTTOM & SCROLLABLE MIDDLE (Mixes & Géneros)
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+
+            ui.label(egui::RichText::new("⚡ 100% Libre • Sin Publicidad").size(9.5).color(Color32::from_rgb(100, 100, 100)));
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                // Theme toggle chip
+                let theme_label = if self.use_spotify_green { "🟢 Verde" } else { "🟠 Ámbar" };
+                let theme_btn = egui::Button::new(egui::RichText::new(theme_label).size(11.0).color(Color32::from_rgb(200, 200, 200)))
+                    .fill(Color32::from_rgb(26, 26, 26))
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(88.0, 26.0));
+                if ui.add(theme_btn).on_hover_text("Cambiar color de acento visual").clicked() {
+                    self.use_spotify_green = !self.use_spotify_green;
+                }
+
+                ui.add_space(4.0);
+
+                // Mobile Mode pill
+                let mobile_btn = egui::Button::new(egui::RichText::new("📱 Móvil").size(11.0).color(accent))
+                    .fill(Color32::from_rgb(26, 26, 26))
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(88.0, 26.0));
+                if ui.add(mobile_btn).on_hover_text("Cambiar a interfaz smartphone (390x820)").clicked() {
+                    self.is_mobile_mode = true;
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(390.0, 820.0)));
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title("📱 Melodyfy Mobile".into()));
+                }
+            });
+
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // 4. SCROLLABLE MIDDLE SECTION: MIXES & GÉNEROS
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("MIXES & GÉNEROS").size(10.5).color(Color32::from_rgb(120, 120, 120)).strong());
+                });
+                ui.add_space(4.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        let genres = [
+                            ("🎧 Lo-Fi Chill Gaming", "Lo-Fi Gaming Chill Beats"),
+                            ("⚡ Synthwave & Cyberpunk", "Synthwave Cyberpunk 80s"),
+                            ("🎸 Rock Legendario", "Rock Clásico 80s 90s"),
+                            ("🔥 Top Global 2026", "Top Éxitos Mundiales 2026"),
+                            ("🌸 Anime Openings", "Anime Openings HD"),
+                            ("🚗 Phonk Drift Music", "Phonk Drift Bass boosted"),
+                        ];
+
+                        for (display, query) in genres {
+                            let (g_rect, g_resp) = ui.allocate_exact_size(Vec2::new(tab_btn_w, 26.0), egui::Sense::click());
+                            if g_resp.hovered() {
+                                ui.painter().rect_filled(g_rect, Rounding::same(6.0), Color32::from_rgb(24, 24, 24));
+                            }
+                            let g_color = if g_resp.hovered() { Color32::WHITE } else { Color32::from_rgb(170, 170, 170) };
+                            ui.painter().text(
+                                egui::pos2(g_rect.left() + 8.0, g_rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                display,
+                                FontId::proportional(12.0),
+                                g_color,
+                            );
+
+                            if g_resp.clicked() {
+                                self.search_query = query.to_string();
+                                self.current_tab = ViewTab::Search;
+                                self.trigger_search(query);
+                            }
+                        }
+                    });
+            });
         });
     }
 
