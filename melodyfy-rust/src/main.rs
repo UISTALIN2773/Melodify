@@ -67,8 +67,28 @@ fn main() -> eframe::Result<()> {
         "Melodyfy",
         native_options,
         Box::new(move |cc| {
-            // Load Windows native Segoe UI Emoji font as fallback to eliminate ToFU (□)
+            // Load Windows native fonts as fallback to eliminate ToFU (□) for Korean / CJK / Emojis
             let mut fonts = eframe::egui::FontDefinitions::default();
+
+            // 1. Korean / Asian Hangul (Malgun Gothic)
+            if let Ok(font_bytes) = std::fs::read("C:\\Windows\\Fonts\\malgun.ttf") {
+                fonts.font_data.insert(
+                    "malgun".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_bytes)),
+                );
+                fonts
+                    .families
+                    .entry(eframe::egui::FontFamily::Proportional)
+                    .or_default()
+                    .push("malgun".to_owned());
+                fonts
+                    .families
+                    .entry(eframe::egui::FontFamily::Monospace)
+                    .or_default()
+                    .push("malgun".to_owned());
+            }
+
+            // 2. Windows native Segoe UI Emoji
             if let Ok(font_bytes) = std::fs::read("C:\\Windows\\Fonts\\seguiemj.ttf") {
                 fonts.font_data.insert(
                     "seguiemj".to_owned(),

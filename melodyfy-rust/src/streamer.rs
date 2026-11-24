@@ -20,11 +20,48 @@ pub struct Streamer {
 }
 
 impl Streamer {
+    pub fn find_ffplay_path() -> Option<PathBuf> {
+        let candidates = [
+            PathBuf::from("ffplay.exe"),
+            PathBuf::from("../ffplay.exe"),
+            PathBuf::from("C:\\Users\\HP\\Desktop\\For GIt\\melodyfy-rust\\ffplay.exe"),
+            PathBuf::from("C:\\Users\\HP\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.2-full_build\\bin\\ffplay.exe"),
+        ];
+
+        for c in &candidates {
+            if c.exists() {
+                return Some(c.clone());
+            }
+        }
+
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let winget_path = PathBuf::from(format!(
+                "{}\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.2-full_build\\bin\\ffplay.exe",
+                local_app_data
+            ));
+            if winget_path.exists() {
+                return Some(winget_path);
+            }
+        }
+
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                let candidate = dir.join("ffplay.exe");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn new() -> Self {
         let candidates = [
             PathBuf::from("yt-dlp.exe"),
             PathBuf::from("../yt-dlp.exe"),
-            PathBuf::from("C:\\Users\\HP\\Desktop\\For GIt\\lite-music-player\\yt-dlp.exe"),
+            PathBuf::from("C:\\Users\\HP\\Desktop\\For GIt\\melodyfy-rust\\yt-dlp.exe"),
+            PathBuf::from("C:\\Users\\HP\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\yt-dlp.exe"),
         ];
 
         let yt_dlp_path = candidates

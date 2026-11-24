@@ -66,6 +66,9 @@ pub struct MelodyfyApp {
     pub pip_corner: usize, // 0 = Bottom-Right, 1 = Top-Right, 2 = Bottom-Left, 3 = Top-Left
     pub pip_opacity: f32, // 1.0, 0.85, 0.70
     pub pip_last_interaction: Instant,
+    pub pip_video_child: Option<std::process::Child>,
+    pub pip_video_rx: Option<Receiver<(String, Option<String>, f64)>>,
+    pub pip_active_track_id: Option<String>,
 
     // Theme Accent (true = Spotify Green, false = Melodyfy Amber)
     use_spotify_green: bool,
@@ -136,6 +139,9 @@ impl MelodyfyApp {
             pip_corner: 0,
             pip_opacity: 1.0,
             pip_last_interaction: Instant::now(),
+            pip_video_child: None,
+            pip_video_rx: None,
+            pip_active_track_id: None,
             use_spotify_green: true,
             is_editing_tags: false,
             show_add_tag_dialog: false,
@@ -223,6 +229,25 @@ impl MelodyfyApp {
         }
 
         self.fetch_lyrics_for_current();
+
+        if self.is_pip_video_mode {
+            self.start_pip_video_stream();
+        }
+    }
+
+    pub fn start_pip_video_stream(&mut self) {
+        let Some(track) = self.current_track().cloned() else { return };
+        let streamer = Arc::clone(&self.streamer);
+        let (tx, rx) = channel();
+        self.pip_video_rx = Some(rx);
+        let track_clone = track.clone();
+        let current_pos = self.audio.get_status().position;
+        self.show_toast(format!("📺 Conectando video en vivo: {}...", track.title));
+
+        std::thread::spawn(move || {
+            let video_url = streamer.resolve_video_stream_url(&track_clone);
+            let _ = tx.send((track_clone.id, video_url, current_pos));
+        });
     }
 
     pub fn fetch_lyrics_for_current(&mut self) {
@@ -439,11 +464,79 @@ impl eframe::App for MelodyfyApp {
                     if curr.id == track_id {
                         self.is_loading_stream = false;
                         if let Some(stream_url) = maybe_url {
-                            self.audio.play_url(stream_url);
+                            // Only play internal audio if NOT in active video PiP mode
+                            if !self.is_pip_video_mode || self.pip_video_child.is_none() {
+                                self.audio.play_url(stream_url);
+                            }
                         } else {
                             self.show_toast("Error al cargar stream de audio");
                         }
                     }
+                }
+            }
+        }
+
+        // Background Video PiP stream resolution
+        if let Some(ref rx) = self.pip_video_rx {
+            if let Ok((track_id, maybe_url, start_pos)) = rx.try_recv() {
+                if let Some(curr) = self.current_track() {
+                    if curr.id == track_id && self.is_pip_video_mode {
+                        if let Some(video_url) = maybe_url {
+                            if let Some(ffplay_path) = Streamer::find_ffplay_path() {
+                                if let Some(mut prev) = self.pip_video_child.take() {
+                                    let _ = prev.kill();
+                                }
+                                self.audio.pause();
+
+                                let corner_pos = Self::get_screen_corner_pos(self.pip_corner, 426.0, 240.0);
+                                let left = corner_pos.x as i32;
+                                let top = corner_pos.y as i32;
+
+                                let mut cmd = std::process::Command::new(&ffplay_path);
+                                cmd.args(&[
+                                    "-noborder",
+                                    "-alwaysontop",
+                                    "-x", "426",
+                                    "-y", "240",
+                                    "-left", &left.to_string(),
+                                    "-top", &top.to_string(),
+                                    "-window_title", "Melodyfy Video PiP",
+                                    "-ss", &format!("{:.1}", start_pos),
+                                    &video_url,
+                                ]);
+
+                                match cmd.spawn() {
+                                    Ok(child) => {
+                                        self.pip_video_child = Some(child);
+                                        self.pip_active_track_id = Some(track_id);
+                                        self.show_toast("🔴 Video PiP en reproducción activa");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[Melodyfy PiP] Error al ejecutar ffplay: {:?}", e);
+                                        self.audio.play();
+                                        self.show_toast("Error al ejecutar reproductor de video");
+                                    }
+                                }
+                            } else {
+                                self.show_toast("⚠️ No se encontró ffplay.exe");
+                            }
+                        } else {
+                            self.show_toast("⚠️ No se pudo obtener el stream de video");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Monitor PiP video child process (exit / close detection)
+        if let Some(ref mut child) = self.pip_video_child {
+            if let Ok(Some(_)) = child.try_wait() {
+                self.pip_video_child = None;
+                self.pip_active_track_id = None;
+                if self.is_pip_video_mode {
+                    self.toggle_pip_mode(ctx);
+                } else {
+                    self.audio.play();
                 }
             }
         }
@@ -2458,6 +2551,20 @@ impl MelodyfyApp {
         }
     }
 
+    pub fn move_pip_video_to_corner(&self, corner: usize) {
+        let pos = Self::get_screen_corner_pos(corner, 426.0, 240.0);
+        let left = pos.x as i32;
+        let top = pos.y as i32;
+
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOACTIVATE};
+            let hwnd = FindWindowA(windows::core::PCSTR::null(), windows::core::s!("Melodyfy Video PiP"));
+            if hwnd.0 != 0 {
+                let _ = SetWindowPos(hwnd, HWND_TOPMOST, left, top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+    }
+
     pub fn toggle_pip_mode(&mut self, ctx: &egui::Context) {
         self.is_pip_video_mode = !self.is_pip_video_mode;
         if self.is_pip_video_mode {
@@ -2468,7 +2575,15 @@ impl MelodyfyApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner_pos));
             ctx.send_viewport_cmd(egui::ViewportCommand::Title("📺 Melodyfy — PiP Video Player".into()));
+
+            self.start_pip_video_stream();
         } else {
+            if let Some(mut child) = self.pip_video_child.take() {
+                let _ = child.kill();
+            }
+            self.pip_active_track_id = None;
+            self.audio.play();
+
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1150.0, 740.0)));
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
             ctx.send_viewport_cmd(egui::ViewportCommand::Title("🎧 Melodyfy Rust — Reproductor Libre, Rápido y Sin Anuncios".into()));
@@ -2493,6 +2608,7 @@ impl MelodyfyApp {
                 self.pip_corner = (self.pip_corner + 1) % 4;
                 let pos = Self::get_screen_corner_pos(self.pip_corner, 426.0, 240.0);
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+                self.move_pip_video_to_corner(self.pip_corner);
             }
             if i.key_pressed(egui::Key::O) {
                 self.pip_opacity = match self.pip_opacity {
@@ -2551,20 +2667,20 @@ impl MelodyfyApp {
 
             // Discreet badge when HUD is hidden
             if !show_hud {
-                let is_playing = status.state == 3;
-                let badge_text = if is_playing { "🔴 PiP" } else { "⏸️ PiP" };
+                let is_video_active = self.pip_video_child.is_some();
+                let badge_text = if is_video_active { "🔴 LIVE VIDEO" } else { "📺 PiP" };
                 let badge_pos = rect.left_top() + Vec2::new(8.0, 8.0);
                 ui.painter().rect_filled(
-                    egui::Rect::from_min_size(badge_pos, Vec2::new(48.0, 18.0)),
+                    egui::Rect::from_min_size(badge_pos, Vec2::new(if is_video_active { 82.0 } else { 48.0 }, 18.0)),
                     Rounding::same(4.0),
                     Color32::from_black_alpha(160),
                 );
                 ui.painter().text(
-                    badge_pos + Vec2::new(24.0, 9.0),
+                    badge_pos + Vec2::new(if is_video_active { 41.0 } else { 24.0 }, 9.0),
                     egui::Align2::CENTER_CENTER,
                     badge_text,
                     FontId::proportional(10.0),
-                    if is_playing { Color32::from_rgb(255, 80, 80) } else { Color32::LIGHT_GRAY },
+                    if is_video_active { Color32::from_rgb(255, 80, 80) } else { Color32::LIGHT_GRAY },
                 );
             }
         } else {
@@ -2606,6 +2722,7 @@ impl MelodyfyApp {
                                 self.pip_corner = c_idx;
                                 let pos = Self::get_screen_corner_pos(c_idx, 426.0, 240.0);
                                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+                                self.move_pip_video_to_corner(c_idx);
                             }
                         }
 
@@ -2619,6 +2736,14 @@ impl MelodyfyApp {
                                 t.title.clone()
                             };
                             ui.label(egui::RichText::new(title_clipped).strong().size(11.5).color(Color32::WHITE));
+                        }
+
+                        if self.pip_video_child.is_none() && curr_track.is_some() {
+                            if ui.add(egui::Button::new(egui::RichText::new("▶ Conectar Video").size(10.0).strong().color(Color32::BLACK)).fill(accent).rounding(Rounding::same(6.0)))
+                                .on_hover_text("Iniciar reproducción de video en vivo (ffplay)").clicked()
+                            {
+                                self.start_pip_video_stream();
+                            }
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

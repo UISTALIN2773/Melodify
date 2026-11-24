@@ -15,8 +15,8 @@ if exist "C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Buil
 )
 if exist "C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\km\crt" (
     set "INCLUDE=%~dp0melodyfy-rust\target\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\km\crt;%INCLUDE%;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\shared"
-    set "LIB=%~dp0melodyfy-rust\target\libs;%LIB%;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\km\x64"
-    set "PATH=%~dp0melodyfy-rust\target\libs;%PATH%"
+    set "LIB=C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Tools\MSVC\14.52.37025\lib\x64;%~dp0melodyfy-rust\target\libs;%LIB%;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\km\x64"
+    set "PATH=C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Tools\MSVC\14.52.37025\bin\Hostx64\x64;%~dp0melodyfy-rust\target\libs;%PATH%"
 )
 
 :: 2. Compilar Desktop Rust (.exe con logo.ico incrustado)
@@ -53,6 +53,7 @@ if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
 mkdir "%DIST_DIR%\assets"
 copy /Y "Melodyfy-Rust.exe" "%DIST_DIR%\" >nul
 if exist "yt-dlp.exe" copy /Y "yt-dlp.exe" "%DIST_DIR%\" >nul
+if exist "ffplay.exe" copy /Y "ffplay.exe" "%DIST_DIR%\" >nul
 copy /Y "README.md" "%DIST_DIR%\" >nul
 if exist "assets\logo.jpg" copy /Y "assets\logo.jpg" "%DIST_DIR%\assets\" >nul
 if exist "assets\logo.ico" copy /Y "assets\logo.ico" "%DIST_DIR%\assets\" >nul

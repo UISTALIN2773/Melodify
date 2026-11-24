@@ -23,6 +23,7 @@ Melodyfy-Mobile.exe
 *.apk
 *.old
 yt-dlp.exe
+ffplay.exe
 melodyfy-mobile/build/
 melodyfy-mobile/.dart_tool/
 
