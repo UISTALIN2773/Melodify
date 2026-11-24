@@ -72,6 +72,7 @@ pub struct MelodyfyApp {
     pub pip_video_child: Option<std::process::Child>,
     pub pip_video_rx: Option<Receiver<(String, Option<String>, f64)>>,
     pub pip_active_track_id: Option<String>,
+    pub pip_styled: bool,
 
     // Theme Accent (true = Spotify Green, false = Melodyfy Amber)
     use_spotify_green: bool,
@@ -145,6 +146,7 @@ impl MelodyfyApp {
             pip_video_child: None,
             pip_video_rx: None,
             pip_active_track_id: None,
+            pip_styled: false,
             use_spotify_green: true,
             is_editing_tags: false,
             show_add_tag_dialog: false,
@@ -517,6 +519,7 @@ impl eframe::App for MelodyfyApp {
                                     Ok(child) => {
                                         self.pip_video_child = Some(child);
                                         self.pip_active_track_id = Some(track_id);
+                                        self.pip_styled = false;
                                         self.show_toast("🔴 Video PiP en reproducción activa");
                                     }
                                     Err(e) => {
@@ -536,11 +539,17 @@ impl eframe::App for MelodyfyApp {
             }
         }
 
-        // Monitor PiP video child process (exit / close detection)
+        // Monitor PiP video child process (exit / close detection) & Apply DWM Dark Titlebar
         if let Some(ref mut child) = self.pip_video_child {
+            if !self.pip_styled {
+                if Self::apply_dark_titlebar_to_pip() {
+                    self.pip_styled = true;
+                }
+            }
             if let Ok(Some(_)) = child.try_wait() {
                 self.pip_video_child = None;
                 self.pip_active_track_id = None;
+                self.pip_styled = false;
                 if self.is_pip_video_mode {
                     self.toggle_pip_mode(ctx);
                 } else {
@@ -621,14 +630,19 @@ impl eframe::App for MelodyfyApp {
 
         let accent = self.accent_color();
 
-        // High fidelity Spotify Dark theme
+        // Sophisticated Obsidian Glass Dark theme
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(18, 18, 18);
-        visuals.window_fill = Color32::from_rgb(18, 18, 18);
+        visuals.panel_fill = Color32::from_rgb(16, 16, 16);
+        visuals.window_fill = Color32::from_rgb(16, 16, 16);
         visuals.selection.bg_fill = accent;
         visuals.hyperlink_color = accent;
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(40, 40, 40);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(50, 50, 50);
+        visuals.widgets.noninteractive.rounding = Rounding::same(10.0);
+        visuals.widgets.inactive.rounding = Rounding::same(10.0);
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 26, 26);
+        visuals.widgets.hovered.rounding = Rounding::same(10.0);
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 38, 38);
+        visuals.widgets.active.rounding = Rounding::same(10.0);
+        visuals.widgets.active.bg_fill = Color32::from_rgb(48, 48, 48);
         ctx.set_visuals(visuals);
 
         // Toast overlay if active
@@ -680,6 +694,12 @@ impl eframe::App for MelodyfyApp {
         // BOTTOM PLAYBACK BAR (Always fixed at bottom)
         egui::TopBottomPanel::bottom("bottom_bar")
             .exact_height(90.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(14, 14, 14))
+                    .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(28, 28, 28)))
+                    .inner_margin(egui::Margin::symmetric(12.0, 6.0))
+            )
             .show(ctx, |ui| {
                 ui.style_mut().spacing.item_spacing = Vec2::new(12.0, 4.0);
                 self.render_bottom_player_bar(ui, accent);
@@ -689,15 +709,27 @@ impl eframe::App for MelodyfyApp {
         egui::SidePanel::left("left_sidebar")
             .exact_width(230.0)
             .resizable(false)
+            .frame(
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(12, 12, 12))
+                    .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(24, 24, 24)))
+                    .inner_margin(egui::Margin::symmetric(10.0, 10.0))
+            )
             .show(ctx, |ui| {
                 ui.style_mut().spacing.item_spacing = Vec2::new(0.0, 8.0);
                 self.render_sidebar(ui, accent);
             });
 
         // CENTRAL MAIN AREA
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.render_main_content(ui, accent);
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(18, 18, 18))
+                    .inner_margin(egui::Margin::symmetric(16.0, 10.0))
+            )
+            .show(ctx, |ui| {
+                self.render_main_content(ui, accent);
+            });
     }
 }
 
@@ -736,8 +768,8 @@ impl MelodyfyApp {
 
         for (tab, icon, label) in tabs {
             let is_active = self.current_tab == tab;
-            let bg = if is_active { Color32::from_rgb(40, 40, 40) } else { Color32::TRANSPARENT };
-            let text_color = if is_active { Color32::WHITE } else { Color32::from_rgb(179, 179, 179) };
+            let bg = if is_active { Color32::from_rgb(30, 30, 30) } else { Color32::TRANSPARENT };
+            let text_color = if is_active { Color32::WHITE } else { Color32::from_rgb(175, 175, 175) };
 
             let content = egui::RichText::new(format!("  {}   {}", icon, label))
                 .size(13.5)
@@ -747,10 +779,15 @@ impl MelodyfyApp {
             let btn = egui::Button::new(content)
                 .fill(bg)
                 .rounding(Rounding::same(8.0))
-                .min_size(Vec2::new(200.0, 34.0));
+                .min_size(Vec2::new(194.0, 34.0));
 
             ui.horizontal(|ui| {
-                ui.add_space(12.0);
+                ui.add_space(8.0);
+                let (ind_rect, _) = ui.allocate_exact_size(Vec2::new(3.0, 22.0), egui::Sense::hover());
+                if is_active {
+                    ui.painter().rect_filled(ind_rect, Rounding::same(1.5), accent);
+                }
+                ui.add_space(3.0);
                 if ui.add(btn).clicked() {
                     self.current_tab = tab;
                     if tab == ViewTab::Lyrics {
@@ -827,6 +864,23 @@ impl MelodyfyApp {
     }
 
     fn render_main_content(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        // Ambient Glow & Subtle Mouse Parallax Depth (0 Extra MB RAM, pure mathematical gradient)
+        let content_rect = ui.available_rect_before_wrap();
+        let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or_else(|| content_rect.center());
+        let rel_x = ((pointer_pos.x - content_rect.center().x) / (content_rect.width() * 0.5).max(1.0)).clamp(-1.0, 1.0);
+        let rel_y = ((pointer_pos.y - content_rect.center().y) / (content_rect.height() * 0.5).max(1.0)).clamp(-1.0, 1.0);
+        let glow_center = egui::pos2(
+            content_rect.left() + 240.0 + rel_x * 26.0,
+            content_rect.top() + 90.0 + rel_y * 18.0,
+        );
+        let glow_color = Color32::from_rgba_premultiplied(
+            accent.r() / 8,
+            accent.g() / 8,
+            accent.b() / 8,
+            18,
+        );
+        ui.painter().circle_filled(glow_center, 280.0, glow_color);
+
         ui.add_space(14.0);
 
         // Search Input Bar with Clear button & Action
@@ -1758,7 +1812,7 @@ impl MelodyfyApp {
                                 Color32::from_rgb(115, 115, 115)
                             };
 
-                            let font_size = if is_active { 25.0 } else { 18.0 };
+                            let font_size = if is_active { 26.0 } else { 18.0 };
                             let mut rich = egui::RichText::new(&line.text)
                                 .size(font_size)
                                 .color(text_color);
@@ -1767,11 +1821,19 @@ impl MelodyfyApp {
                                 rich = rich.strong();
                             }
 
-                            let resp = ui.add(
+                            let btn = if is_active {
+                                egui::Button::new(rich)
+                                    .fill(Color32::from_rgba_premultiplied(accent.r() / 7, accent.g() / 7, accent.b() / 7, 35))
+                                    .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 75)))
+                                    .rounding(Rounding::same(14.0))
+                                    .min_size(Vec2::new((ui.available_width() - 40.0).max(200.0), font_size + 18.0))
+                            } else {
                                 egui::Button::new(rich)
                                     .frame(false)
-                                    .min_size(Vec2::new(ui.available_width() - 40.0, font_size + 14.0))
-                            );
+                                    .min_size(Vec2::new((ui.available_width() - 40.0).max(200.0), font_size + 14.0))
+                            };
+
+                            let resp = ui.add(btn);
 
                             if is_active && lyrics.is_synced {
                                 resp.scroll_to_me(Some(egui::Align::Center));
@@ -2142,13 +2204,13 @@ impl MelodyfyApp {
 
                     ui.add_space(8.0);
 
-                    // Large Circular Play/Pause Button
+                    // Large Circular Hero Play/Pause Button
                     let is_playing = status.state == 3;
                     let play_symbol = if is_playing { "⏸" } else { "▶" };
-                    let play_btn = egui::Button::new(egui::RichText::new(play_symbol).size(18.0).strong().color(Color32::BLACK))
+                    let play_btn = egui::Button::new(egui::RichText::new(play_symbol).size(20.0).strong().color(Color32::BLACK))
                         .fill(accent)
-                        .rounding(Rounding::same(20.0))
-                        .min_size(Vec2::new(38.0, 38.0));
+                        .rounding(Rounding::same(21.0))
+                        .min_size(Vec2::new(42.0, 42.0));
 
                     if ui.add(play_btn).clicked() {
                         self.audio.toggle_play_pause();
@@ -2225,117 +2287,140 @@ impl MelodyfyApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(14.0);
 
-                // Video PiP Floating Overlay Button (426x240 Always-on-Top)
-                if ui.add(egui::Button::new(egui::RichText::new("📺").size(14.5)).frame(false))
-                    .on_hover_text("Modo Visor PiP Video para Juegos (Ventana Anclada 16:9, <30MB RAM)").clicked()
-                {
-                    self.toggle_pip_mode(ui.ctx());
-                }
+                // --- OBSIDIAN GLASS PILL TOOLBAR ---
+                let pill_frame = egui::Frame::none()
+                    .fill(Color32::from_rgb(24, 24, 24))
+                    .rounding(Rounding::same(16.0))
+                    .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(40, 40, 40)))
+                    .inner_margin(egui::Margin::symmetric(8.0, 4.0));
 
-                ui.add_space(4.0);
+                pill_frame.show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
 
-                // Mini-Player / Background Mode HUD (440x120 floating)
-                let mini_icon = if self.is_mini_mode { "🪟" } else { "🕹️" };
-                if ui.add(egui::Button::new(egui::RichText::new(mini_icon).size(14.5)).frame(false))
-                    .on_hover_text("Modo Mini / 2º Plano Flotante (440x120)").clicked()
-                {
-                    self.is_mini_mode = !self.is_mini_mode;
-                    let (new_size, on_top) = if self.is_mini_mode {
-                        (Vec2::new(440.0, 120.0), true)
-                    } else {
-                        (Vec2::new(1150.0, 740.0), false)
-                    };
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(new_size));
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(if on_top {
-                        egui::WindowLevel::AlwaysOnTop
-                    } else {
-                        egui::WindowLevel::Normal
-                    }));
-                }
+                    // 1. PiP Video Button (High-End Pill)
+                    let is_pip = self.is_pip_video_mode;
+                    let pip_bg = if is_pip { accent } else { Color32::from_rgb(34, 34, 34) };
+                    let pip_fg = if is_pip { Color32::BLACK } else { Color32::WHITE };
+                    let pip_btn = egui::Button::new(
+                        egui::RichText::new("📺 PiP Video").size(11.5).strong().color(pip_fg)
+                    )
+                    .fill(pip_bg)
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(72.0, 26.0));
 
-                ui.add_space(4.0);
-
-                // Sleep Timer button
-                let timer_active = self.sleep_timer_minutes > 0;
-                let timer_color = if timer_active { accent } else { Color32::from_rgb(170, 170, 170) };
-                let timer_label = if let Some(end) = self.sleep_timer_end {
-                    let rem_mins = (end.saturating_duration_since(Instant::now()).as_secs() / 60) + 1;
-                    format!("🌙{}m", rem_mins)
-                } else {
-                    "🌙".to_string()
-                };
-                if ui.add(egui::Button::new(egui::RichText::new(timer_label).size(12.5).color(timer_color)).frame(false))
-                    .on_hover_text("Temporizador de Sueño (Off / 15m / 30m / 45m / 60m)").clicked()
-                {
-                    self.cycle_sleep_timer();
-                }
-
-                ui.add_space(4.0);
-
-                // Infinite Radio Auto-Mix toggle
-                let radio_color = if self.is_auto_radio { accent } else { Color32::from_rgb(150, 150, 150) };
-                if ui.add(egui::Button::new(egui::RichText::new("📻").size(14.5).color(radio_color)).frame(false))
-                    .on_hover_text("Radio Infinita Auto-Mix (Añade música similar automáticamente al terminar la cola)").clicked()
-                {
-                    self.is_auto_radio = !self.is_auto_radio;
-                    self.library.auto_radio = Some(self.is_auto_radio);
-                    self.library.save();
-                    let msg = if self.is_auto_radio { "📻 Radio Infinita ACTIVADA" } else { "📻 Radio Infinita DESACTIVADA" };
-                    self.show_toast(msg);
-                }
-
-                ui.add_space(4.0);
-
-                // Speed / Nightcore / Slowed Effect preset button
-                let is_custom_speed = (self.playback_rate - 1.0).abs() > 0.05;
-                let speed_color = if is_custom_speed { accent } else { Color32::from_rgb(170, 170, 170) };
-                let speed_label = format!("{:.2}x", self.playback_rate).replace(".00x", ".0x").replace("1.50x", "1.5x");
-                if ui.add(egui::Button::new(egui::RichText::new(speed_label).size(11.5).strong().color(speed_color)).frame(false))
-                    .on_hover_text("Efecto de Velocidad DSP: 1.0x Normal / 1.25x Nightcore / 1.5x Fast / 0.85x Slowed").clicked()
-                {
-                    self.cycle_playback_rate();
-                }
-
-                ui.add_space(4.0);
-
-                // Lyrics button (Spotify Style)
-                let lyrics_color = if self.current_tab == ViewTab::Lyrics { accent } else { Color32::from_rgb(170, 170, 170) };
-                if ui.add(egui::Button::new(egui::RichText::new("🎤").size(14.5).color(lyrics_color)).frame(false))
-                    .on_hover_text("Letras sincronizadas (Karaoke)").clicked()
-                {
-                    if self.current_tab == ViewTab::Lyrics {
-                        self.current_tab = ViewTab::Home;
-                    } else {
-                        self.current_tab = ViewTab::Lyrics;
-                        self.fetch_lyrics_for_current();
+                    if ui.add(pip_btn).on_hover_text("Modo Visor PiP Video para Juegos (Ventana Anclada 16:9, <30MB RAM)").clicked() {
+                        self.toggle_pip_mode(ui.ctx());
                     }
-                }
 
-                ui.add_space(4.0);
+                    // 2. Karaoke Lyrics Button (High-End Pill)
+                    let is_lyrics = self.current_tab == ViewTab::Lyrics;
+                    let lyrics_bg = if is_lyrics { accent } else { Color32::from_rgb(34, 34, 34) };
+                    let lyrics_fg = if is_lyrics { Color32::BLACK } else { Color32::WHITE };
+                    let lyrics_btn = egui::Button::new(
+                        egui::RichText::new("🎤 Letras").size(11.5).strong().color(lyrics_fg)
+                    )
+                    .fill(lyrics_bg)
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(64.0, 26.0));
 
-                // Queue button
-                let q_color = if self.current_tab == ViewTab::Queue { accent } else { Color32::from_rgb(170, 170, 170) };
-                if ui.add(egui::Button::new(egui::RichText::new("📑").size(14.5).color(q_color)).frame(false))
-                    .on_hover_text("Ver Cola de Reproducción").clicked()
-                {
-                    self.current_tab = ViewTab::Queue;
-                }
+                    if ui.add(lyrics_btn).on_hover_text("Letras sincronizadas (Karaoke)").clicked() {
+                        if self.current_tab == ViewTab::Lyrics {
+                            self.current_tab = ViewTab::Home;
+                        } else {
+                            self.current_tab = ViewTab::Lyrics;
+                            self.fetch_lyrics_for_current();
+                        }
+                    }
 
-                ui.add_space(6.0);
+                    // 3. Mini-Player Button
+                    let mini_btn = egui::Button::new(
+                        egui::RichText::new("🕹️ Mini").size(11.0).color(Color32::from_rgb(220, 220, 220))
+                    )
+                    .fill(Color32::from_rgb(30, 30, 30))
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(52.0, 26.0));
 
-                // Custom Spotify Volume Bar (80px)
-                if let Some(new_vol) = Self::custom_spotify_volume_bar(ui, self.volume, 80.0, accent) {
+                    if ui.add(mini_btn).on_hover_text("Modo Mini / 2º Plano Flotante (440x120)").clicked() {
+                        self.is_mini_mode = !self.is_mini_mode;
+                        let (new_size, on_top) = if self.is_mini_mode {
+                            (Vec2::new(440.0, 120.0), true)
+                        } else {
+                            (Vec2::new(1150.0, 740.0), false)
+                        };
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(new_size));
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(if on_top {
+                            egui::WindowLevel::AlwaysOnTop
+                        } else {
+                            egui::WindowLevel::Normal
+                        }));
+                    }
+
+                    // 4. DSP Speed Preset Pill
+                    let is_custom_speed = (self.playback_rate - 1.0).abs() > 0.05;
+                    let speed_bg = if is_custom_speed { Color32::from_rgba_premultiplied(accent.r() / 4, accent.g() / 4, accent.b() / 4, 180) } else { Color32::from_rgb(30, 30, 30) };
+                    let speed_fg = if is_custom_speed { accent } else { Color32::from_rgb(200, 200, 200) };
+                    let speed_label = format!("⚡ {:.2}x", self.playback_rate).replace(".00x", ".0x").replace("1.50x", "1.5x");
+                    let speed_btn = egui::Button::new(
+                        egui::RichText::new(speed_label).size(10.5).strong().color(speed_fg)
+                    )
+                    .fill(speed_bg)
+                    .rounding(Rounding::same(12.0))
+                    .min_size(Vec2::new(52.0, 26.0));
+
+                    if ui.add(speed_btn).on_hover_text("Efecto de Velocidad DSP: 1.0x Normal / 1.25x Nightcore / 1.5x Fast / 0.85x Slowed").clicked() {
+                        self.cycle_playback_rate();
+                    }
+
+                    // 5. Radio Auto-mix Button
+                    let radio_fg = if self.is_auto_radio { accent } else { Color32::from_rgb(150, 150, 150) };
+                    if ui.add(egui::Button::new(egui::RichText::new("📻").size(13.0).color(radio_fg)).frame(false))
+                        .on_hover_text("Radio Infinita Auto-Mix").clicked()
+                    {
+                        self.is_auto_radio = !self.is_auto_radio;
+                        self.library.auto_radio = Some(self.is_auto_radio);
+                        self.library.save();
+                        let msg = if self.is_auto_radio { "📻 Radio Infinita ACTIVADA" } else { "📻 Radio Infinita DESACTIVADA" };
+                        self.show_toast(msg);
+                    }
+
+                    // 6. Sleep Timer Button
+                    let timer_active = self.sleep_timer_minutes > 0;
+                    let timer_fg = if timer_active { accent } else { Color32::from_rgb(160, 160, 160) };
+                    let timer_label = if let Some(end) = self.sleep_timer_end {
+                        let rem_mins = (end.saturating_duration_since(Instant::now()).as_secs() / 60) + 1;
+                        format!("🌙{}m", rem_mins)
+                    } else {
+                        "🌙".to_string()
+                    };
+                    if ui.add(egui::Button::new(egui::RichText::new(timer_label).size(11.5).color(timer_fg)).frame(false))
+                        .on_hover_text("Temporizador de Sueño (Off / 15m / 30m / 45m / 60m)").clicked()
+                    {
+                        self.cycle_sleep_timer();
+                    }
+
+                    // 7. Queue Button
+                    let q_color = if self.current_tab == ViewTab::Queue { accent } else { Color32::from_rgb(160, 160, 160) };
+                    if ui.add(egui::Button::new(egui::RichText::new("📑").size(13.0).color(q_color)).frame(false))
+                        .on_hover_text("Ver Cola de Reproducción").clicked()
+                    {
+                        self.current_tab = ViewTab::Queue;
+                    }
+                });
+
+                ui.add_space(8.0);
+
+                // --- VOLUME CLUSTER ---
+                if let Some(new_vol) = Self::custom_spotify_volume_bar(ui, self.volume, 74.0, accent) {
                     self.volume = new_vol;
                     self.audio.set_volume(new_vol);
                     self.library.last_volume = Some(new_vol);
                     self.library.save();
                 }
 
-                ui.add_space(4.0);
+                ui.add_space(2.0);
 
-                // Volume icon toggle
                 let vol_icon = if self.volume == 0 { "🔇" } else if self.volume < 50 { "🔉" } else { "🔊" };
-                if ui.add(egui::Button::new(egui::RichText::new(vol_icon).size(14.0)).frame(false))
+                if ui.add(egui::Button::new(egui::RichText::new(vol_icon).size(13.5)).frame(false))
                     .on_hover_text(if self.volume == 0 { "Desmutear" } else { "Silenciar" }).clicked()
                 {
                     if self.volume > 0 { self.volume = 0; } else { self.volume = 80; }
@@ -2570,6 +2655,65 @@ impl MelodyfyApp {
             if hwnd.0 != 0 {
                 let _ = SetWindowPos(hwnd, HWND_TOPMOST, left, top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             }
+        }
+    }
+
+    pub fn apply_dark_titlebar_to_pip() -> bool {
+        unsafe {
+            extern "system" {
+                fn LoadLibraryA(lpLibFileName: *const u8) -> isize;
+                fn GetProcAddress(hModule: isize, lpProcName: *const u8) -> *const std::ffi::c_void;
+                fn FindWindowA(lpClassName: *const u8, lpWindowName: *const u8) -> isize;
+                fn LoadImageA(hInst: isize, name: *const u8, type_: u32, cx: i32, cy: i32, fuLoad: u32) -> isize;
+                fn SendMessageA(hWnd: isize, Msg: u32, wParam: usize, lParam: isize) -> isize;
+            }
+
+            let title = b"Melodyfy Video PiP\0";
+            let hwnd = FindWindowA(std::ptr::null(), title.as_ptr());
+            if hwnd != 0 {
+                // 1. Set Official Melodyfy Icon on Window Titlebar
+                let icon_path_buf = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("assets").join("logo.ico")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("assets/logo.ico"));
+                let icon_str = format!("{}\0", icon_path_buf.to_string_lossy());
+                let hicon = LoadImageA(0, icon_str.as_ptr(), 1 /* IMAGE_ICON */, 32, 32, 0x0010 /* LR_LOADFROMFILE */);
+                if hicon != 0 {
+                    let _ = SendMessageA(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, hicon);
+                    let _ = SendMessageA(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hicon);
+                }
+
+                // 2. Set Immersive Dark Mode & Dark Chrome Colors via DWM (DwmSetWindowAttribute)
+                let lib_name = b"dwmapi.dll\0";
+                let h_dwm = LoadLibraryA(lib_name.as_ptr());
+                if h_dwm != 0 {
+                    let proc_name = b"DwmSetWindowAttribute\0";
+                    let proc = GetProcAddress(h_dwm, proc_name.as_ptr());
+                    if !proc.is_null() {
+                        type FnDwm = unsafe extern "system" fn(isize, u32, *const std::ffi::c_void, u32) -> i32;
+                        let set_attr: FnDwm = std::mem::transmute(proc);
+
+                        let dark: i32 = 1;
+                        // DWMWA_USE_IMMERSIVE_DARK_MODE (20 on Win 11 / 10 20H1+, 19 on older Win 10)
+                        let _ = set_attr(hwnd, 20, &dark as *const _ as *const _, 4);
+                        let _ = set_attr(hwnd, 19, &dark as *const _ as *const _, 4);
+
+                        // DWMWA_CAPTION_COLOR (35) -> 0x00121212 (deep obsidian grey titlebar)
+                        let caption: u32 = 0x00121212;
+                        let _ = set_attr(hwnd, 35, &caption as *const _ as *const _, 4);
+
+                        // DWMWA_TEXT_COLOR (36) -> 0x00FFFFFF (white title text)
+                        let text: u32 = 0x00FFFFFF;
+                        let _ = set_attr(hwnd, 36, &text as *const _ as *const _, 4);
+
+                        // DWMWA_BORDER_COLOR (34) -> 0x00282828 (subtle dark border)
+                        let border: u32 = 0x00282828;
+                        let _ = set_attr(hwnd, 34, &border as *const _ as *const _, 4);
+                    }
+                }
+                return true;
+            }
+            false
         }
     }
 
